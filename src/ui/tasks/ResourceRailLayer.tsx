@@ -16,11 +16,24 @@ import { railPath } from '../../engine/layout';
 import { formatValue } from '../../engine/resources';
 import type { Warning } from '../../engine/validate';
 import { useStore } from '../../state/store';
+import { TagBadges, type BadgeTag } from './TagBadges';
 
-export const RAIL_HEIGHT = 92;
-const BLOCK_HEIGHT = 34;
+export const RAIL_HEIGHT = 108;
+/** Hoeher als frueher: unter den Kennzahlen ist Platz fuer die Tag-Marken. */
+const BLOCK_HEIGHT = 50;
+
+/*
+ * Alle Bloecke sind gleich hoch - eine Leiste mit unterschiedlich hohen
+ * Kaesten waere unruhig. Bloecke ohne Tags haetten dann aber unten ein totes
+ * Loch, deshalb rutscht ihr Inhalt in die Mitte. Die beiden Werte sind die
+ * Hoehe des Inhalts mit und ohne Markenzeile.
+ */
+const CONTENT_HEIGHT_WITH_TAGS = 42;
+const CONTENT_HEIGHT_PLAIN = 24;
+/** Obere Kante des Inhalts, wenn er oben ausgerichtet waere. */
+const CONTENT_TOP = 4;
 const BLOCK_GAP = 12;
-const MIN_BLOCK_WIDTH = 104;
+const MIN_BLOCK_WIDTH = 118;
 /** Linke Kante des Textes - lässt Platz für das Symbol der Ressourcenart. */
 const TEXT_X = 30;
 
@@ -37,6 +50,8 @@ interface RailBlock {
   kind: BlockKind;
   label: string;
   detail: string;
+  /** Tags der Ressource - Bedingungen haben keine. */
+  tags: BadgeTag[];
   taskIds: Id[];
   /** Grenzwert überschritten bzw. Bedingung nicht erfüllt. */
   alert: boolean;
@@ -85,9 +100,12 @@ export function ResourceRailLayer({
       label: string;
       detail: string;
       amount: number;
+      tags: BadgeTag[];
       taskIds: Id[];
       alert: boolean;
     }
+    const tagsOf = (ids: Id[]): BadgeTag[] =>
+      ids.map((id) => client.tags.find((t) => t.id === id)).filter((t): t is BadgeTag => Boolean(t));
     const map = new Map<Id, Entry>();
 
     for (const task of tasks) {
@@ -96,7 +114,15 @@ export function ResourceRailLayer({
         if (!person) continue;
         const entry =
           map.get(person.id) ??
-          ({ kind: 'person', label: person.name, detail: '', amount: 0, taskIds: [], alert: false } as Entry);
+          ({
+            kind: 'person',
+            label: person.name,
+            detail: '',
+            amount: 0,
+            tags: tagsOf(person.tagIds),
+            taskIds: [],
+            alert: false,
+          } as Entry);
         entry.amount += a.mode === 'FTE' ? a.value : 0;
         entry.taskIds.push(task.id);
         map.set(person.id, entry);
@@ -106,7 +132,15 @@ export function ResourceRailLayer({
         if (!budget) continue;
         const entry =
           map.get(budget.id) ??
-          ({ kind: 'budget', label: budget.name, detail: '', amount: 0, taskIds: [], alert: false } as Entry);
+          ({
+            kind: 'budget',
+            label: budget.name,
+            detail: '',
+            amount: 0,
+            tags: tagsOf(budget.tagIds),
+            taskIds: [],
+            alert: false,
+          } as Entry);
         entry.amount += c.amount;
         entry.taskIds.push(task.id);
         map.set(budget.id, entry);
@@ -122,6 +156,7 @@ export function ResourceRailLayer({
             label: condition.name,
             detail: condition.met ? 'erfüllt' : 'offen',
             amount: 0,
+            tags: [],
             taskIds: [],
             alert: !condition.met,
           } as Entry);
@@ -144,6 +179,7 @@ export function ResourceRailLayer({
           : entry.kind === 'budget'
             ? `${formatValue(entry.amount, 'EUR')} geplant`
             : entry.detail,
+      tags: entry.tags,
       taskIds: [...new Set(entry.taskIds)],
       alert: entry.alert || (resourceWarnings.get(id)?.length ?? 0) > 0,
       x: BLOCK_GAP + index * (blockWidth + BLOCK_GAP),
@@ -188,7 +224,7 @@ export function ResourceRailLayer({
               key={`${block.id}-${taskId}`}
               className={`edge edge--rail${lit ? ' edge--lit' : ''}`}
               d={railPath(anchor.x, anchor.y, block.x + block.width / 2, blockY)}
-              opacity={lit ? 0.95 : highlighted ? 0.12 : 0.35}
+              opacity={lit ? 0.9 : highlighted ? 0.08 : 0.18}
               stroke={lit ? 'var(--accent)' : undefined}
             />
           );
@@ -224,18 +260,29 @@ export function ResourceRailLayer({
               fill={block.alert ? 'var(--warn-soft)' : 'var(--surface-2)'}
               stroke={block.alert ? 'var(--warn)' : 'var(--border)'}
             />
-            <KindIcon kind={block.kind} alert={block.alert} />
-            <text x={TEXT_X} y={15} className="node__title" fontSize={11}>
-              {truncate(block.label, Math.floor((block.width - TEXT_X) / 6))}
-            </text>
-            <text x={TEXT_X} y={27} className="node__meta">
-              {block.detail}
-            </text>
+            {/* Ohne Tags sitzt der Inhalt mittig statt oben - siehe oben. */}
+            <g transform={`translate(0,${contentOffset(block.tags.length > 0)})`}>
+              <KindIcon kind={block.kind} alert={block.alert} />
+              <text x={TEXT_X} y={15} className="node__title" fontSize={11}>
+                {truncate(block.label, Math.floor((block.width - TEXT_X) / 6))}
+              </text>
+              <text x={TEXT_X} y={27} className="node__meta">
+                {block.detail}
+              </text>
+              {/* Tags identisch zu den Aufgabenknoten. */}
+              <TagBadges tags={block.tags} y={33} available={block.width - TEXT_X - 8} startX={TEXT_X - 8} />
+            </g>
           </g>
         );
       })}
     </g>
   );
+}
+
+/** Senkrechte Verschiebung, damit der Inhalt im gleich hohen Block mittig sitzt. */
+function contentOffset(hasTags: boolean): number {
+  const height = hasTags ? CONTENT_HEIGHT_WITH_TAGS : CONTENT_HEIGHT_PLAIN;
+  return Math.round((BLOCK_HEIGHT - height) / 2 - CONTENT_TOP);
 }
 
 /**

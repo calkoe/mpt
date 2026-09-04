@@ -7,6 +7,7 @@ import { migrate } from './migrate';
 import { createDatabase, createDemoClient } from './factory';
 import { CURRENT_SCHEMA_VERSION, isOpenEnded } from './types';
 import { computeSchedule } from '../engine/schedule';
+import { isVentureDone } from '../engine/validate';
 
 describe('Migration', () => {
   it('lässt einen aktuellen Datenbestand unverändert', () => {
@@ -33,7 +34,6 @@ describe('Migration', () => {
     expect(task.schedule.durationMax).toBeGreaterThanOrEqual(task.schedule.durationMin);
     expect(task.status).toBe('open');
     expect(task.checklist).toEqual([]);
-    expect(task.notes).toBe('');
   });
 
   it('übernimmt eine alte Einzel-Dauer in die Spanne', () => {
@@ -128,6 +128,114 @@ describe('Migration', () => {
     // Das neue Meilenstein-Kennzeichen wird ergaenzt.
     expect(betrieb.milestone).toBe(false);
     expect(result.migrated).toBe(true);
+  });
+
+  it('hebt Schema 2 auf 3: Freitext, Vorhaben, Tags, Budgetart, Bedarfe, Kosten', () => {
+    const result = migrate({
+      schemaVersion: 2,
+      clients: [
+        {
+          id: 'c1',
+          name: 'Alt',
+          tags: [{ id: 'tg1', name: 'Extern', color: '#4f7cff' }],
+          ventures: [{ id: 'v1', name: 'V', description: 'faellt weg', done: true }],
+          people: [{ id: 'p1', name: 'P', defaultFte: 1 }],
+          budgets: [{ id: 'b1', name: 'B', totalLimit: 100 }],
+          tasks: [
+            {
+              id: 't1',
+              ventureId: 'v1',
+              title: 'A',
+              status: 'blocked',
+              notes: 'geht verloren',
+              schedule: { anchor: 'date', durationMin: 3, durationMax: 3 },
+              assignments: [{ id: 'a1', personId: 'p1', mode: 'FTE', value: 0.5 }],
+              costs: [{ id: 'k1', budgetId: 'b1', label: 'K', amount: 500, recurring: false, interval: 'month', every: 1 }],
+            },
+          ],
+        },
+      ],
+    });
+
+    const client = result.db.clients[0];
+    const task = client.tasks[0];
+
+    // Die Kette laeuft bis zur aktuellen Version durch, nicht nur einen Schritt.
+    expect(result.db.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
+    // Freitext und Vorhabenbeschreibung sind weg, der Abschlussschalter auch.
+    expect('notes' in task).toBe(false);
+    expect('description' in client.ventures[0]).toBe(false);
+    expect('done' in client.ventures[0]).toBe(false);
+    // "Blockiert" wird zu "Offen" - nicht zu "Betrieb", das hiesse erledigt.
+    expect(task.status).toBe('open');
+    // Neue Felder mit Defaults.
+    expect(task.layout).toBeUndefined();
+    expect(client.people[0].tagIds).toEqual([]);
+    expect(client.budgets[0].kind).toBe('neutral');
+    expect(client.budgets[0].tagIds).toEqual([]);
+    expect(task.assignments[0].periods).toEqual([]);
+    expect(task.costs[0].actualAmount).toBe(0);
+    // Bestehendes bleibt unangetastet.
+    expect(task.assignments[0].value).toBe(0.5);
+    expect(task.costs[0].amount).toBe(500);
+  });
+
+  it('leitet den Vorhabenstatus aus den Aufgaben ab', () => {
+    const client = createDemoClient();
+    const betrieb = client.ventures[1];
+    // Der Beispielmandant hat im Vorhaben "Betrieb" genau eine Dauerlaeufer-Aufgabe.
+    expect(isVentureDone(client, betrieb.id)).toBe(false);
+    for (const t of client.tasks.filter((x) => x.ventureId === betrieb.id)) t.status = 'operations';
+    // "Betrieb" zaehlt wie abgeschlossen.
+    expect(isVentureDone(client, betrieb.id)).toBe(true);
+  });
+
+  it('entfernt tote Tag-Verweise an Personen und Budgets', () => {
+    const result = migrate({
+      schemaVersion: CURRENT_SCHEMA_VERSION,
+      clients: [
+        {
+          id: 'c1',
+          name: 'X',
+          tags: [{ id: 'tg1', name: 'Echt', color: '#4f7cff' }],
+          ventures: [],
+          tasks: [],
+          people: [{ id: 'p1', name: 'P', tagIds: ['tg1', 'weg'] }],
+          budgets: [{ id: 'b1', name: 'B', tagIds: ['weg'] }],
+        },
+      ],
+    });
+    expect(result.db.clients[0].people[0].tagIds).toEqual(['tg1']);
+    expect(result.db.clients[0].budgets[0].tagIds).toEqual([]);
+  });
+
+  it('ergaenzt das Notizfeld an Kostenpositionen (Schema 3 -> 4)', () => {
+    const result = migrate({
+      schemaVersion: 3,
+      clients: [
+        {
+          id: 'c1',
+          name: 'X',
+          ventures: [{ id: 'v1', name: 'V' }],
+          tasks: [
+            {
+              id: 't1',
+              ventureId: 'v1',
+              title: 'A',
+              costs: [
+                { id: 'k1', budgetId: 'b1', label: 'K', amount: 100, actualAmount: 40, recurring: false, interval: 'month', every: 1 },
+              ],
+            },
+          ],
+          budgets: [{ id: 'b1', name: 'B' }],
+        },
+      ],
+    });
+    const cost = result.db.clients[0].tasks[0].costs[0];
+    expect(cost.note).toBe('');
+    // Geplant und abgerufen bleiben unangetastet.
+    expect(cost.amount).toBe(100);
+    expect(cost.actualAmount).toBe(40);
   });
 
   it('verwirft unvollstaendige Sperrvermerke, statt die Datei zu blockieren', () => {

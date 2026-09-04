@@ -53,7 +53,7 @@ export function TopBar({
 }) {
   const store = useStore();
   const { prefs, setPrefs } = usePreferences();
-  const { total: warningCount } = useWarningGroups();
+  const { total: warningCount, worst: worstWarning } = useWarningGroups();
 
   const [dialog, setDialog] = useState<DialogKind | null>(null);
   const [notes, setNotes] = useState<string[]>([]);
@@ -225,12 +225,13 @@ export function TopBar({
       <div className="spacer" />
 
       {/*
-        Warnzentrum - der Zähler ist zugleich der Einstieg. Bewusst orange und
-        nicht rot: das sind Hinweise auf Planungsstände, keine Fehler.
+        Warnzentrum - der Zähler ist zugleich der Einstieg und trägt die Farbe
+        des schwersten Befunds: rot bei überschrittenen Grenzen, orange wenn es
+        eng wird, sonst neutral.
       */}
       <button
         type="button"
-        className={`warncount${warningCount > 0 ? " warncount--active" : ""}`}
+        className={`warncount${worstWarning ? ` warncount--${worstWarning}` : ""}`}
         onClick={onOpenWarnings}
         title={
           warningCount > 0

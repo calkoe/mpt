@@ -15,37 +15,54 @@
 import { useMemo, useState } from 'react';
 import type { Id } from '../../model/types';
 import { formatValue, type ResourceSeries } from '../../engine/resources';
-import { formatDateDe } from '../../engine/dates';
+import { diffDays, formatDateDe, today } from '../../engine/dates';
 import { useElementSize } from '../components/useElementSize';
 import { taskColorOf } from '../components/taskPalette';
 
 const PADDING_LEFT = 54;
-const PADDING_RIGHT = 12;
+/** Rechts liegt die zweite Achse fuer die kumulierte Summe. */
+const PADDING_RIGHT = 62;
 const PADDING_TOP = 10;
 const PADDING_BOTTOM = 26;
 const MIN_BUCKET_WIDTH = 18;
-/** Unterhalb dieser Höhe wird das Diagramm unlesbar. */
-const MIN_HEIGHT = 150;
+/** Nur als Rückfallwert, solange die Fläche noch nicht gemessen wurde. */
+const FALLBACK_HEIGHT = 150;
 
 export function ResourceChart({
   series,
   onSelectTask,
   taskLabel,
   taskColors,
+  zoom,
 }: {
   series: ResourceSeries;
   onSelectTask?: (taskId: Id) => void;
   taskLabel: (taskId: Id) => string;
   taskColors: Map<Id, string>;
+  /** Gemeinsame Zoomstufe aller Ganglinien - siehe ResourceOverview. */
+  zoom: number;
 }) {
   const [hover, setHover] = useState<number | null>(null);
   const box = useElementSize<HTMLDivElement>();
 
   const count = series.points.length;
-  // Ein Pixel Reserve: sonst erzeugt eine halbe Pixelzeile aus der Messung
-  // einen senkrechten Scrollbalken, obwohl das Diagramm genau passt.
-  const height = Math.max(MIN_HEIGHT, (box.height || MIN_HEIGHT) - 1);
-  const innerWidth = Math.max(320, count * MIN_BUCKET_WIDTH);
+  /*
+   * Die Zeichenflaeche folgt exakt der gemessenen Hoehe. Eine Untergrenze
+   * darueber waere falsch: waere sie groesser als die Kachel, ragte das SVG
+   * unten heraus und die Beschriftung der Zeitachse wuerde abgeschnitten.
+   * Fuer genug Platz sorgt stattdessen die Mindesthoehe der Rasterzeile
+   * (`.resource-grid`). Ein Pixel Reserve verhindert einen Scrollbalken durch
+   * Rundung.
+   */
+  const height = box.height > 0 ? box.height - 1 : FALLBACK_HEIGHT;
+  /*
+   * Untergrenze bewusst niedrig: sie soll nur verhindern, dass ein Diagramm
+   * mit sehr wenigen Zeitraeumen zum Strich zusammenfaellt. Ein hoher Wert
+   * wuerde dem automatischen Einpassen entgegenarbeiten - die Flaeche waere
+   * dann breiter als die Kachel und das Diagramm liesse sich nur scrollend
+   * betrachten.
+   */
+  const innerWidth = Math.max(120, count * MIN_BUCKET_WIDTH * zoom);
   const width = PADDING_LEFT + innerWidth + PADDING_RIGHT;
   const bucketWidth = innerWidth / Math.max(1, count);
   const maxValue = Math.max(series.peak, 1e-6) * 1.15;
@@ -63,6 +80,40 @@ export function ResourceChart({
       return `${left} ${right}`;
     })
     .join(' ');
+
+  /*
+   * Kumulierte Linie, auf die eigene Hoehe skaliert. Sie steigt monoton; ihre
+   * Steigung zeigt den Bedarf je Zeiteinheit.
+   */
+  const cumulativeMax = Math.max(series.cumulativeTotal, 1e-6);
+  /** Personentage statt FTE: eine Rate laesst sich nicht aufsummieren. */
+  const cumulativeUnit = series.unit === 'FTE' ? 'PT' : series.unit;
+  const cumulativeY = (value: number) =>
+    PADDING_TOP + (1 - value / cumulativeMax) * (height - PADDING_TOP - PADDING_BOTTOM);
+  const cumulativeTicks = [0, 0.25, 0.5, 0.75, 1].map((f) => f * cumulativeMax);
+  const cumulativePath =
+    series.cumulativeTotal > 0
+      ? series.points
+          .map((point, index) => `${index === 0 ? 'M' : 'L'} ${x(index) + bucketWidth / 2} ${cumulativeY(point.cumulative)}`)
+          .join(' ')
+      : '';
+
+  /**
+   * Waagerechte Lage des heutigen Tages. Der Bucket, in den er faellt, wird
+   * anteilig interpoliert - sonst spraenge die Linie bei grobem Raster um ein
+   * ganzes Quartal.
+   */
+  const todayIso = today();
+  const todayX = (() => {
+    const index = series.points.findIndex(
+      (p) => diffDays(p.bucket.start, todayIso) >= 0 && diffDays(todayIso, p.bucket.end) >= 0,
+    );
+    if (index < 0) return null;
+    const bucket = series.points[index].bucket;
+    const span = Math.max(1, diffDays(bucket.start, bucket.end) + 1);
+    const into = diffDays(bucket.start, todayIso) / span;
+    return x(index) + bucketWidth * into;
+  })();
 
   const hasLimit = series.points.some((p) => p.limit > 0);
   const hovered = hover !== null ? series.points[hover] : null;
@@ -148,6 +199,44 @@ export function ResourceChart({
               </g>
             );
           })}
+
+          {/*
+            Kumulierte Linie mit eigener Achse rechts. Die Summe ist um
+            Groessenordnungen groesser als der Wert je Zeitraum - auf derselben
+            Skala waeren die Saeulen platt oder die Linie liefe aus dem Bild.
+          */}
+          {cumulativePath && (
+            <>
+              <line
+                className="chart__axis chart__axis--cumulative"
+                x1={width - PADDING_RIGHT}
+                y1={PADDING_TOP}
+                x2={width - PADDING_RIGHT}
+                y2={y(0)}
+              />
+              {cumulativeTicks.map((tick, i) => (
+                <text
+                  key={i}
+                  className="chart__tick chart__tick--cumulative"
+                  x={width - PADDING_RIGHT + 6}
+                  y={cumulativeY(tick) + 3}
+                >
+                  {compact(tick, cumulativeUnit)}
+                </text>
+              ))}
+              <path className="chart__cumulative" d={cumulativePath} />
+            </>
+          )}
+
+          {/*
+            Heute als gestrichelte Senkrechte - dasselbe Zeichen wie im Gantt,
+            damit man in beiden Ansichten sofort weiss, wo man steht.
+          */}
+          {todayX !== null && (
+            <line className="chart__today" x1={todayX} y1={PADDING_TOP} x2={todayX} y2={y(0)}>
+              <title>Heute</title>
+            </line>
+          )}
 
           {/* Grenzwert */}
           {hasLimit && <path className="chart__limit" d={limitPath} />}

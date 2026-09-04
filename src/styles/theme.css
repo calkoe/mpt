@@ -86,7 +86,9 @@
   /* Aufgabenstatus */
   --status-open: #8c93a1;
   --status-active: #3559d9;
-  --status-blocked: #9b6311;
+  /* Betrieb: dunkleres Gruen als "abgeschlossen" - fachlich verwandt,
+     optisch unterscheidbar. Kontrast gegen --surface/--surface-2 geprueft. */
+  --status-operations: #0f5c46;
   --status-done: #1c7c59;
 
   /* Diagramme (dekorativ, daher bewusst zurückhaltend) */
@@ -133,7 +135,7 @@
 
   --status-open: #767e8d;
   --status-active: #6b8dff;
-  --status-blocked: #e6ac4d;
+  --status-operations: #2f9d78;
   --status-done: #52c69a;
 
   --grid-line: #262b34;

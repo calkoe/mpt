@@ -47,11 +47,15 @@ das Ergebnis zurück.
 ## Datenmodell (Kurzfassung)
 
 - \`clients[]\` - Mandanten, vollständig voneinander getrennte Datenräume.
-  - \`ventures[]\` - Vorhaben: \`{ id, name, description, done }\`. Bündeln Aufgaben.
+  - \`ventures[]\` - Vorhaben: \`{ id, name }\`. Bündeln Aufgaben. Ob ein Vorhaben
+    abgeschlossen ist, wird **abgeleitet** (alle Aufgaben \`done\` oder \`operations\`)
+    und nicht gespeichert. Die Reihenfolge im Array ist die Anzeigereihenfolge.
   - \`tasks[]\` - Aufgaben:
     - \`ventureId\` - genau ein Vorhaben.
-    - \`title\`, \`description\` (kurz), \`notes\` (Freitext), \`checklist[] {id,text,done}\`.
-    - \`status\` - \`open\` | \`active\` | \`blocked\` | \`done\`.
+    - \`title\`, \`description\` (kurz), \`checklist[] {id,text,done}\`.
+    - \`status\` - \`open\` | \`active\` | \`operations\` | \`done\`.
+      \`operations\` = Betrieb: inhaltlich fertig, bindet aber dauerhaft
+      Ressourcen. Zaehlt fachlich wie \`done\`.
     - \`milestone\` - \`true\` bei Meilensteinen (im Plan hervorgehoben).
     - \`schedule\`:
       - \`anchor: "date"\` -> fester Start in \`start\`.
@@ -65,13 +69,19 @@ das Ergebnis zurück.
     - \`ventureConditions[]\` - Vorhaben, die abgeschlossen sein müssen (nur Warnung).
     - \`conditionIds[]\` - ungetrackte Bedingungen (nur Warnung).
     - \`tagIds[]\`.
-    - \`assignments[]\` - \`{ id, personId, mode: "PT"|"FTE", value }\`.
+    - \`assignments[]\` - \`{ id, personId, mode: "PT"|"FTE", value, periods[] }\`.
       PT = Personentage gesamt, FTE = Anteil pro Woche (0..1), gleichverteilt über die Laufzeit.
-    - \`costs[]\` - \`{ id, budgetId, label, amount, recurring, interval, every }\`.
+      \`periods\` sind abweichende Bedarfe je Zeitraum \`{ id, from?, to?, value }\`;
+      leer = überall \`value\`. Zeitraeume ausserhalb der Aufgabenlaufzeit werden zugeschnitten.
+    - \`costs[]\` - \`{ id, budgetId, label, amount, actualAmount, recurring, interval, every }\`.
+      \`amount\` = geplant, \`actualAmount\` = tatsaechlich abgerufen (0 = noch nichts).
       \`interval\`: \`day|week|month|quarter|year\`, \`every\` = Faktor N (z.B. every 3, interval month = alle 3 Monate).
-  - \`people[]\` - \`{ id, name, role, defaultFte, availability[] }\`; \`availability\` sind
+    - \`layout\` - optionale Handverschiebung im Netzplan \`{ dx, dy }\`, relativ zur
+      automatisch berechneten Position. Weglassen heisst "automatisch".
+  - \`people[]\` - \`{ id, name, role, defaultFte, availability[], tagIds[] }\`; \`availability\` sind
     zeitraumabhängige Werte \`{ id, from?, to?, value }\`.
-  - \`budgets[]\` - \`{ id, name, totalLimit, limits[] }\`; \`limits\` analog in Euro.
+  - \`budgets[]\` - \`{ id, name, kind, totalLimit, limits[], tagIds[] }\`; \`limits\` analog in Euro.
+    \`kind\`: \`neutral\` | \`order\` (Beauftragung) | \`investment\`.
   - \`tags[]\` - \`{ id, name, color }\`; \`color\` ist ein Hexwert und bleibt stabil.
   - \`conditions[]\` - \`{ id, name, met }\`.
 

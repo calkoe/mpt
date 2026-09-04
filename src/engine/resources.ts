@@ -48,6 +48,12 @@ export function taskMatchesFilter(task: Task, filter: ResourceFilter): boolean {
 export interface Contribution {
   taskId: Id;
   value: number;
+  /**
+   * Nur bei Budgets belegt: der tatsächlich abgerufene Anteil. `value` ist
+   * immer der geplante Betrag, damit alle bestehenden Auswertungen unverändert
+   * die Planung zeigen.
+   */
+  actual?: number;
 }
 
 export interface SeriesPoint {
@@ -58,6 +64,17 @@ export interface SeriesPoint {
   limit: number;
   /** Anteile je Aufgabe, absteigend sortiert. */
   parts: Contribution[];
+  /**
+   * Laufende Summe vom Beginn des Zeitraums bis einschliesslich dieses
+   * Buckets. Bei Budgets in Euro, bei Personen in Personentagen - FTE ist eine
+   * Rate und liesse sich nicht sinnvoll aufsummieren. Die Linie steigt
+   * monoton; ihre Steigung zeigt den Bedarf je Zeiteinheit.
+   */
+  cumulative: number;
+  /** Nur bei Budgets: tatsächlich abgerufener Betrag im Bucket. */
+  actual: number;
+  /** Nur bei Budgets: laufende Summe der Abrufe. */
+  cumulativeActual: number;
 }
 
 export interface ResourceSeries {
@@ -74,6 +91,8 @@ export interface ResourceSeries {
   yearly: { year: number; value: number; limit: number }[];
   /** Buckets mit Grenzwertüberschreitung. */
   breaches: string[];
+  /** Endwert der kumulierten Linie - Gesamtmenge über den Zeitraum. */
+  cumulativeTotal: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -99,12 +118,55 @@ export function personDailyLoad(
     for (const a of task.assignments) {
       const target = result.get(a.personId);
       if (!target) continue;
-      const perDay = a.mode === 'FTE' ? a.value : a.value / days.length;
-      if (!Number.isFinite(perDay) || perDay === 0) continue;
-      for (const day of days) {
-        const list = target.get(day) ?? [];
-        list.push({ taskId: task.id, value: perDay });
-        target.set(day, list);
+
+      /*
+       * Der Bedarf je Tag: der Grundwert, sofern kein Zeitraum greift.
+       * Zeiträume ausserhalb der Aufgabenlaufzeit haben keine Wirkung - es
+       * werden ohnehin nur die Arbeitstage der Aufgabe durchlaufen, der
+       * Zuschnitt geschieht also von selbst. Gemeldet wird das in
+       * `validate.ts`.
+       */
+      const rateAt = (day: IsoDate) =>
+        a.periods.length > 0 ? periodValueAt(a.periods, day, a.value) : a.value;
+
+      if (a.mode === 'FTE') {
+        for (const day of days) {
+          const perDay = rateAt(day);
+          if (!Number.isFinite(perDay) || perDay === 0) continue;
+          const list = target.get(day) ?? [];
+          list.push({ taskId: task.id, value: perDay });
+          target.set(day, list);
+        }
+        continue;
+      }
+
+      /*
+       * Personentage sind eine Gesamtmenge, keine Rate. Mit Zeiträumen wird
+       * die Summe je Zeitraum auf dessen Tage verteilt; ohne Zeiträume wie
+       * bisher gleichmässig über die ganze Laufzeit.
+       */
+      if (a.periods.length === 0) {
+        const perDay = a.value / days.length;
+        if (!Number.isFinite(perDay) || perDay === 0) continue;
+        for (const day of days) {
+          const list = target.get(day) ?? [];
+          list.push({ taskId: task.id, value: perDay });
+          target.set(day, list);
+        }
+        continue;
+      }
+
+      for (const period of a.periods) {
+        const inPeriod = days.filter(
+          (d) => (!period.from || diffDays(period.from, d) >= 0) && (!period.to || diffDays(d, period.to) >= 0),
+        );
+        const perDay = period.value / Math.max(1, inPeriod.length);
+        if (inPeriod.length === 0 || !Number.isFinite(perDay) || perDay === 0) continue;
+        for (const day of inPeriod) {
+          const list = target.get(day) ?? [];
+          list.push({ taskId: task.id, value: perDay });
+          target.set(day, list);
+        }
       }
     }
   }
@@ -149,7 +211,7 @@ export function budgetDailyLoad(
 
       const push = (day: IsoDate) => {
         const list = target.get(day) ?? [];
-        list.push({ taskId: task.id, value: cost.amount });
+        list.push({ taskId: task.id, value: cost.amount, actual: cost.actualAmount });
         target.set(day, list);
       };
 
@@ -192,15 +254,17 @@ function aggregateBucket(
   daily: Map<IsoDate, Contribution[]>,
   bucket: Bucket,
   mode: 'sum' | 'workdayAverage',
-): { value: number; parts: Contribution[] } {
+): { value: number; parts: Contribution[]; rawSum: number; actual: number; workdays: number } {
   const parts = new Map<Id, number>();
   let sum = 0;
+  let actual = 0;
   let workdays = 0;
   let cur = bucket.start;
   while (diffDays(cur, bucket.end) >= 0) {
     if (isWorkday(cur)) workdays++;
     for (const c of daily.get(cur) ?? []) {
       sum += c.value;
+      actual += c.actual ?? 0;
       parts.set(c.taskId, (parts.get(c.taskId) ?? 0) + c.value);
     }
     cur = addDays(cur, 1);
@@ -209,7 +273,9 @@ function aggregateBucket(
   const list = [...parts.entries()]
     .map(([taskId, value]) => ({ taskId, value: value / divisor }))
     .sort((a, b) => b.value - a.value);
-  return { value: sum / divisor, parts: list };
+  // `rawSum` ist die ungeteilte Summe - genau die wird kumuliert, damit auch
+  // bei FTE eine sinnvolle Groesse (Personentage) entsteht.
+  return { value: sum / divisor, parts: list, rawSum: sum, actual, workdays };
 }
 
 export interface SeriesOptions {
@@ -227,13 +293,16 @@ export function personSeries(
 ): ResourceSeries {
   const buckets = buildBuckets(options.from, options.to, options.granularity);
   const mode = options.personUnit === 'FTE' ? 'workdayAverage' : 'sum';
+  let running = 0;
   const points: SeriesPoint[] = buckets.map((bucket) => {
-    const { value, parts } = aggregateBucket(daily, bucket, mode);
+    const { value, parts, rawSum } = aggregateBucket(daily, bucket, mode);
     // Grenzwert: verfügbare FTE (bei PT auf Personentage im Bucket hochgerechnet).
     const fte = periodValueAt(person.availability, bucket.start, person.defaultFte);
     const workdays = workdaysIn(bucket.start, bucket.end).length;
     const limit = options.personUnit === 'FTE' ? fte : fte * workdays;
-    return { bucket, value, limit, parts };
+    // Kumuliert wird immer in Personentagen - die ungeteilte Tagessumme.
+    running += rawSum;
+    return { bucket, value, limit, parts, cumulative: running, actual: 0, cumulativeActual: 0 };
   });
 
   return finalize(person.id, person.name, 'person', options.personUnit, points, mode, daily, (day) =>
@@ -243,10 +312,14 @@ export function personSeries(
 
 export function budgetSeries(budget: Budget, daily: Map<IsoDate, Contribution[]>, options: SeriesOptions): ResourceSeries {
   const buckets = buildBuckets(options.from, options.to, options.granularity);
+  let running = 0;
+  let runningActual = 0;
   const points: SeriesPoint[] = buckets.map((bucket) => {
-    const { value, parts } = aggregateBucket(daily, bucket, 'sum');
+    const { value, parts, actual } = aggregateBucket(daily, bucket, 'sum');
     const limit = periodValueAt(budget.limits, bucket.start, 0);
-    return { bucket, value, limit, parts };
+    running += value;
+    runningActual += actual;
+    return { bucket, value, limit, parts, cumulative: running, actual, cumulativeActual: runningActual };
   });
 
   return finalize(budget.id, budget.name, 'budget', 'EUR', points, 'sum', daily, (day) =>
@@ -299,7 +372,8 @@ function finalize(
     }));
 
   const breaches = points.filter((p) => p.limit > 0 && p.value > p.limit + 1e-9).map((p) => p.bucket.key);
-  return { resourceId: id, name, kind, unit, points, total, peak, yearly, breaches };
+  const cumulativeTotal = points.length > 0 ? points[points.length - 1].cumulative : 0;
+  return { resourceId: id, name, kind, unit, points, total, peak, yearly, breaches, cumulativeTotal };
 }
 
 /** Formatierung für Anzeigezwecke. */

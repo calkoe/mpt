@@ -245,8 +245,8 @@ describe('Ressourcen', () => {
       schedule: { anchor: 'date', start: MON, durationMin: 10, durationMax: 10 },
     });
     task.assignments = [
-      { id: 'a1', personId: person.id, mode: 'PT', value: 5 },
-      { id: 'a2', personId: person.id, mode: 'FTE', value: 0.5 },
+      { id: 'a1', personId: person.id, mode: 'PT', value: 5, periods: [] },
+      { id: 'a2', personId: person.id, mode: 'FTE', value: 0.5, periods: [] },
     ];
 
     const schedule = computeSchedule(client, 'max');
@@ -273,7 +273,7 @@ describe('Ressourcen', () => {
       title: 'A',
       schedule: { anchor: 'date', start: MON, durationMin: 5, durationMax: 5 },
     });
-    task.assignments = [{ id: 'a1', personId: person.id, mode: 'PT', value: 5 }];
+    task.assignments = [{ id: 'a1', personId: person.id, mode: 'PT', value: 5, periods: [] }];
 
     const schedule = computeSchedule(client, 'max');
     const daily = personDailyLoad(client, schedule, EMPTY_FILTER).get(person.id)!;
@@ -290,8 +290,8 @@ describe('Ressourcen', () => {
       schedule: { anchor: 'date', start: '2026-01-01', durationMin: 200, durationMax: 200 },
     });
     task.costs = [
-      { id: 'c1', budgetId: budget.id, label: 'einmalig', amount: 1000, recurring: false, interval: 'month', every: 1 },
-      { id: 'c2', budgetId: budget.id, label: 'quartalsweise', amount: 500, recurring: true, interval: 'month', every: 3 },
+      { id: 'c1', budgetId: budget.id, label: 'einmalig', amount: 1000, actualAmount: 0, note: '', recurring: false, interval: 'month', every: 1 },
+      { id: 'c2', budgetId: budget.id, label: 'quartalsweise', amount: 500, actualAmount: 0, note: '', recurring: true, interval: 'month', every: 3 },
     ];
 
     const schedule = computeSchedule(client, 'max');
@@ -314,7 +314,7 @@ describe('Ressourcen', () => {
       title: 'A',
       schedule: { anchor: 'date', start: MON, durationMin: 5, durationMax: 5 },
     });
-    task.costs = [{ id: 'c1', budgetId: budget.id, label: 'teuer', amount: 5000, recurring: false, interval: 'month', every: 1 }];
+    task.costs = [{ id: 'c1', budgetId: budget.id, label: 'teuer', amount: 5000, actualAmount: 0, note: '', recurring: false, interval: 'month', every: 1 }];
 
     const schedule = computeSchedule(client, 'max');
     const daily = budgetDailyLoad(client, schedule, EMPTY_FILTER).get(budget.id)!;
@@ -342,7 +342,7 @@ describe('Ressourcen', () => {
       title: 'A',
       schedule: { anchor: 'date', start: MON, durationMin: 5, durationMax: 5 },
     });
-    task.assignments = [{ id: 'a1', personId: person.id, mode: 'FTE', value: 1 }];
+    task.assignments = [{ id: 'a1', personId: person.id, mode: 'FTE', value: 1, periods: [] }];
 
     const schedule = computeSchedule(client, 'max');
     const withoutMatch = personDailyLoad(client, schedule, { tagIds: ['tag1'], ventureIds: [] }).get(person.id)!;
@@ -434,6 +434,76 @@ describe('Warnungen', () => {
     expect(erledigt.some((w) => w.text.includes('Ende war am'))).toBe(false);
   });
 
+  it('verteilt Bedarfszeitraeume und schneidet sie auf die Aufgabe zu', () => {
+    const { client, venture } = buildClient();
+    const person = createPerson('P');
+    person.defaultFte = 1;
+    client.people = [person];
+    // Zehn Arbeitstage: Mo 05.01. bis Fr 16.01.2026.
+    const task = addTask(client, venture, {
+      title: 'A',
+      schedule: { anchor: 'date', start: MON, durationMin: 10, durationMax: 10 },
+    });
+    task.assignments = [
+      {
+        id: 'a1',
+        personId: person.id,
+        mode: 'FTE',
+        value: 0.2,
+        periods: [
+          // Erste Woche abweichend, zweite Woche faellt auf den Grundwert.
+          { id: 'p1', from: MON, to: '2026-01-09', value: 1 },
+          // Liegt komplett hinter der Aufgabe - darf nicht wirken.
+          { id: 'p2', from: '2026-06-01', to: '2026-06-30', value: 1 },
+        ],
+      },
+    ];
+
+    const schedule = computeSchedule(client, 'max');
+    const daily = personDailyLoad(client, schedule, EMPTY_FILTER).get(person.id)!;
+    expect(daily.get(MON)!.reduce((s, c) => s + c.value, 0)).toBeCloseTo(1, 6);
+    // Zweite Woche: kein Zeitraum greift -> Grundwert.
+    expect(daily.get('2026-01-12')!.reduce((s, c) => s + c.value, 0)).toBeCloseTo(0.2, 6);
+    // Ausserhalb der Aufgabe wird nichts gebucht.
+    expect(daily.get('2026-06-01')).toBeUndefined();
+
+    // ... und der unwirksame Zeitraum wird gemeldet.
+    const warnings = taskWarnings(client, schedule, MON).get(task.id) ?? [];
+    expect(warnings.some((w) => w.text.includes('ausserhalb der Aufgabe'))).toBe(true);
+  });
+
+  it('fuehrt eine monoton steigende kumulierte Reihe mit', () => {
+    const { client, venture } = buildClient();
+    const budget = createBudget('B');
+    client.budgets = [budget];
+    const task = addTask(client, venture, {
+      title: 'A',
+      schedule: { anchor: 'date', start: '2026-01-01', durationMin: 200, durationMax: 200 },
+    });
+    task.costs = [
+      { id: 'c1', budgetId: budget.id, label: 'monatlich', amount: 100, actualAmount: 60, note: '', recurring: true, interval: 'month', every: 1 },
+    ];
+
+    const schedule = computeSchedule(client, 'max');
+    const daily = budgetDailyLoad(client, schedule, EMPTY_FILTER).get(budget.id)!;
+    const series = budgetSeries(budget, daily, {
+      from: '2026-01-01',
+      to: '2026-12-31',
+      granularity: 'month',
+      personUnit: 'FTE',
+    });
+
+    const cum = series.points.map((p) => p.cumulative);
+    // Nie fallend.
+    expect(cum.every((v, i) => i === 0 || v >= cum[i - 1])).toBe(true);
+    // Endwert = Summe aller Buckets.
+    expect(series.cumulativeTotal).toBeCloseTo(series.points.reduce((s, p) => s + p.value, 0), 6);
+    // Abrufe laufen getrennt mit und liegen unter der Planung.
+    const lastActual = series.points[series.points.length - 1].cumulativeActual;
+    expect(lastActual).toBeGreaterThan(0);
+    expect(lastActual).toBeLessThan(series.cumulativeTotal);
+  });
+
   it('warnt bei Personen und Budgets schon ab 90 Prozent Auslastung', () => {
     const { client, venture } = buildClient();
     const person = createPerson('P');
@@ -448,9 +518,9 @@ describe('Warnungen', () => {
       schedule: { anchor: 'date', start: MON, durationMin: 5, durationMax: 5 },
     });
     // 0,95 FTE und 950 EUR - beides unter der Grenze, aber ueber 90 Prozent.
-    task.assignments = [{ id: 'a1', personId: person.id, mode: 'FTE', value: 0.95 }];
+    task.assignments = [{ id: 'a1', personId: person.id, mode: 'FTE', value: 0.95, periods: [] }];
     task.costs = [
-      { id: 'c1', budgetId: budget.id, label: 'K', amount: 950, recurring: false, interval: 'month', every: 1 },
+      { id: 'c1', budgetId: budget.id, label: 'K', amount: 950, actualAmount: 0, note: '', recurring: false, interval: 'month', every: 1 },
     ];
 
     const warnings = resourceWarnings(client, computeSchedule(client, 'max'));

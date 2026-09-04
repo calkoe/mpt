@@ -16,7 +16,7 @@ Zum Mitnehmen: Seite speichern (<kbd>Strg</kbd>+<kbd>S</kbd>) – die Datei läu
 <br><br>
 
 [![Build](https://img.shields.io/badge/build-single--file-3559d9)](.github/workflows/build.yml)
-[![Tests](https://img.shields.io/badge/tests-56%20passing-1c7c59)](src/engine/engine.test.ts)
+[![Tests](https://img.shields.io/badge/tests-61%20passing-1c7c59)](src/engine/engine.test.ts)
 [![Lizenz](https://img.shields.io/badge/lizenz-MIT-696e79)](#lizenz)
 [![Quelltext](https://img.shields.io/badge/quelltext-github.com%2Fcalkoe%2Fmpt-24292f)](https://github.com/calkoe/mpt)
 
@@ -33,7 +33,7 @@ angebundenen Ressourcen und Bedingungen, unten die Aufgabe zur Direktbearbeitung
 
 ## Einfach. Und deine Daten bleiben deine.
 
-**Einfachheit** ist keine Zutat, sondern die Bauvorschrift: eine Aufgabe anlegen kostet einen Klick,
+**Einfachheit** eine Aufgabe anlegen kostet einen Klick,
 verketten einen weiteren. Überall Auswahlfelder mit Autovervollständigung, Zahlen als Schieber,
 Ja/Nein als Schalter. Was du eingibst, wirkt sofort – es gibt keinen Speichern-Knopf und keine
 Formulare, die man erst absenden muss.
@@ -55,23 +55,23 @@ Budgets und Mandantendaten bleiben schlicht da, wo sie hingehören.
 
 ## Kernfunktionen
 
-|                           |                                                                                                                       |
-| ------------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| **Netzplan & Gantt**      | Automatisch gelayouteter Abhängigkeitsgraph, zoom- und verschiebbar, umschaltbar auf Balkenplan von Tag bis Jahr.      |
-| **Kritischer Pfad**       | Klassische CPM-Berechnung inkl. Gesamtpuffer je Aufgabe – auf Knopfdruck hervorgehoben.                                |
-| **Verketten per Klick**   | Beim Überfahren einer Aufgabe erscheint links und rechts ein grünes „+" für Vorgänger bzw. Nachfolger.                 |
-| **Dauer als Spanne**      | Aufgaben dauern „4 bis 7 Tage". Ein Umschalter rechnet den ganzen Plan optimistisch oder pessimistisch.                |
-| **Dauerläufer**           | Aufgaben ohne Enddatum wie „Betrieb Infrastruktur X" – laufen zehn Jahre weiter und bleichen im Gantt aus.             |
-| **Meilensteine**          | Im Netzplan als Raute hervorgehoben, im Gantt als senkrechte Linie am Enddatum.                                        |
-| **Ressourcen-Ganglinien** | Auslastung aller Personen (FTE/PT) und Budgets (€), als gestapelte Balken je verursachender Aufgabe.                   |
-| **Warnzentrum**           | Alle Hinweise an einer Stelle: überfällige Aufgaben, offene Bedingungen, Personen und Budgets ab 90 % Auslastung.      |
-| **Parallelität**          | „Solange A läuft, müssen B und C laufen" – wird geprüft und gemeldet, ohne Termine zu verschieben.                     |
-| **Versionierung**         | Automatische Checkpoints (max. alle 10 Min, die letzten 50) plus sofortiges Undo/Redo per `Strg+Z`.                    |
-| **Export**                | Netzplan und Gantt als PNG, der gesamte Bestand als CSV für Excel – beides ohne Umweg über einen Dienst.               |
-| **KI-Austausch**          | Exportiert den Bestand als Markdown mit Schema-Anleitung für ein LLM; der Import zeigt vor der Übernahme einen Diff.   |
-| **Gemeinsame Ablage**     | Sperrvermerk in der Datei, damit auf SharePoint & Co. niemand versehentlich gleichzeitig schreibt.                     |
-| **Tastaturbedienung**     | Vollständig per Tab und Pfeiltasten bedienbar, mit Command-Palette auf `Strg+K`.                                       |
-| **Hell & Dunkel**         | Beide Themes vollständig durchgestaltet, folgt auf Wunsch der Systemeinstellung.                                       |
+|                           |                                                                                                                      |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| **Netzplan & Gantt**      | Automatisch gelayouteter Abhängigkeitsgraph, zoom- und verschiebbar, umschaltbar auf Balkenplan von Tag bis Jahr.    |
+| **Kritischer Pfad**       | Klassische CPM-Berechnung inkl. Gesamtpuffer je Aufgabe – auf Knopfdruck hervorgehoben.                              |
+| **Verketten per Klick**   | Beim Überfahren einer Aufgabe erscheint links und rechts ein grünes „+" für Vorgänger bzw. Nachfolger.               |
+| **Dauer als Spanne**      | Aufgaben dauern „4 bis 7 Tage". Ein Umschalter rechnet den ganzen Plan optimistisch oder pessimistisch.              |
+| **Dauerläufer**           | Aufgaben ohne Enddatum wie „Betrieb Infrastruktur X" – laufen zehn Jahre weiter und bleichen im Gantt aus.           |
+| **Meilensteine**          | Im Netzplan als Raute hervorgehoben, im Gantt als senkrechte Linie am Enddatum.                                      |
+| **Ressourcen-Ganglinien** | Auslastung aller Personen (FTE/PT) und Budgets (€), als gestapelte Balken je verursachender Aufgabe.                 |
+| **Warnzentrum**           | Alle Hinweise an einer Stelle: überfällige Aufgaben, offene Bedingungen, Personen und Budgets ab 90 % Auslastung.    |
+| **Parallelität**          | „Solange A läuft, müssen B und C laufen" – wird geprüft und gemeldet, ohne Termine zu verschieben.                   |
+| **Versionierung**         | Automatische Checkpoints (max. alle 10 Min, die letzten 50) plus sofortiges Undo/Redo per `Strg+Z`.                  |
+| **Export**                | Netzplan und Gantt als PNG, der gesamte Bestand als CSV für Excel – beides ohne Umweg über einen Dienst.             |
+| **KI-Austausch**          | Exportiert den Bestand als Markdown mit Schema-Anleitung für ein LLM; der Import zeigt vor der Übernahme einen Diff. |
+| **Gemeinsame Ablage**     | Sperrvermerk in der Datei, damit auf SharePoint & Co. niemand versehentlich gleichzeitig schreibt.                   |
+| **Tastaturbedienung**     | Vollständig per Tab und Pfeiltasten bedienbar, mit Command-Palette auf `Strg+K`.                                     |
+| **Hell & Dunkel**         | Beide Themes vollständig durchgestaltet, folgt auf Wunsch der Systemeinstellung.                                     |
 
 <div align="center">
 
@@ -128,15 +128,15 @@ in der Kopfzeile erneut öffnen.
 
 ### Tastaturkürzel
 
-| Kürzel                  | Wirkung                  |     | Kürzel      | Wirkung                    |
-| ----------------------- | ------------------------ | --- | ----------- | -------------------------- |
-| `Strg`+`K`              | Command-Palette          |     | `Alt`+`1`   | Aufgaben · Netzplan        |
-| `Strg`+`Z` / `Strg`+`Y` | Rückgängig / Wiederholen |     | `Alt`+`2`   | Aufgaben · Gantt           |
-| `Strg`+`S`              | Sofort speichern         |     | `Alt`+`3`   | Ressourcen · Ganglinien    |
-| `Strg`+`O`              | Datei öffnen             |     | `Alt`+`4`   | Ressourcen · Tabelle       |
-| `Alt`+`N`               | Neue Aufgabe             |     | `Alt`+`G`   | Netzplan ⇄ Gantt           |
-| `Alt`+`V`               | Neues Vorhaben           |     | `Alt`+`W`   | Warnzentrum                |
-|                         |                          |     | `Alt`+`H`   | Kurzanleitung              |
+| Kürzel                  | Wirkung                  |     | Kürzel    | Wirkung                 |
+| ----------------------- | ------------------------ | --- | --------- | ----------------------- |
+| `Strg`+`K`              | Command-Palette          |     | `Alt`+`1` | Aufgaben · Netzplan     |
+| `Strg`+`Z` / `Strg`+`Y` | Rückgängig / Wiederholen |     | `Alt`+`2` | Aufgaben · Gantt        |
+| `Strg`+`S`              | Sofort speichern         |     | `Alt`+`3` | Ressourcen · Ganglinien |
+| `Strg`+`O`              | Datei öffnen             |     | `Alt`+`4` | Ressourcen · Tabelle    |
+| `Alt`+`N`               | Neue Aufgabe             |     | `Alt`+`G` | Netzplan ⇄ Gantt        |
+| `Alt`+`V`               | Neues Vorhaben           |     | `Alt`+`W` | Warnzentrum             |
+|                         |                          |     | `Alt`+`H` | Kurzanleitung           |
 
 ## Fachliches Modell
 
@@ -177,15 +177,15 @@ Liegt die Datei an einem Ort, an den mehrere Leute herankommen, trägt MPT beim 
 ### Wann das automatische Speichern funktioniert
 
 Das Zurückschreiben nutzt die File System Access API. Die gibt es **nur in Chrome oder Edge am
-Rechner** – und auch dort nur, wenn die Seite aus einem *sicheren Kontext* kommt:
+Rechner** – und auch dort nur, wenn die Seite aus einem _sicheren Kontext_ kommt:
 
-| Aufruf                                       | Automatisch speichern            |
-| -------------------------------------------- | ---------------------------------- |
-| `https://…` (z. B. GitHub Pages)             | ✅ ja                              |
-| `http://localhost:…`                          | ✅ ja                              |
-| `file://…` – die Datei per Doppelklick        | ❌ nein                            |
-| `http://192.168.…` – anderer Rechner im Netz  | ❌ nein                            |
-| Safari, Firefox                               | ❌ nein                            |
+| Aufruf                                       | Automatisch speichern |
+| -------------------------------------------- | --------------------- |
+| `https://…` (z. B. GitHub Pages)             | ✅ ja                 |
+| `http://localhost:…`                         | ✅ ja                 |
+| `file://…` – die Datei per Doppelklick       | ❌ nein               |
+| `http://192.168.…` – anderer Rechner im Netz | ❌ nein               |
+| Safari, Firefox                              | ❌ nein               |
 
 Das ist die häufigste Verwechslung: **Chrome kann es, die Seite darf es nur nicht.** Wer die gebaute
 `index.html` doppelklickt, landet auf `file://` und bekommt deshalb keinen Dateizugriff – obwohl der

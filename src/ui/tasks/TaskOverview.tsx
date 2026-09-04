@@ -9,10 +9,11 @@ import { useDerived } from '../../state/useDerived';
 import { usePreferences, type TaskView, type Weighting } from '../../state/preferences';
 import { useStore } from '../../state/store';
 import type { Granularity } from '../../engine/dates';
-import { GRANULARITY_LABEL } from '../../engine/dates';
+import { GRANULARITY_LABEL, SELECTABLE_GRANULARITIES } from '../../engine/dates';
 import type { Scenario } from '../../engine/schedule';
 import { Button, EmptyState, NumberSlider, Segmented, Switch } from '../components/controls';
 import { SplitStack } from '../components/SplitStack';
+import { TagFilter } from '../components/TagFilter';
 import { GanttChart } from './GanttChart';
 import { NetworkChart } from './NetworkChart';
 import { TaskEditor, TaskEditorHeader } from './TaskEditor';
@@ -73,7 +74,7 @@ export function TaskOverview() {
             ariaLabel="Zeitraster"
             value={prefs.ganttGranularity}
             onChange={(ganttGranularity) => setPrefs({ ganttGranularity })}
-            options={(['day', 'week', 'month', 'quarter', 'year'] as Granularity[]).map((g) => ({
+            options={SELECTABLE_GRANULARITIES.map((g) => ({
               value: g,
               label: GRANULARITY_LABEL[g],
             }))}
@@ -127,6 +128,8 @@ export function TaskOverview() {
           Kritischer Pfad
         </Button>
 
+        <TagFilter tagIds={ui.tagFilter} onChange={(tagFilter) => setUi({ tagFilter })} />
+
         <Switch
           checked={prefs.showResourceRail}
           label="Ressourcen"
@@ -170,6 +173,7 @@ export function TaskOverview() {
           <TaskEditorHeader
             client={client}
             task={selected}
+            schedule={derived.schedule}
             warnings={derived.taskWarnings.get(selected.id) ?? []}
           />
         ) : (

@@ -16,6 +16,7 @@ import type { Client, Database, Task } from '../model/types';
 import { COST_INTERVAL_LABEL, isOpenEnded, TASK_STATUS_LABEL } from '../model/types';
 import { formatDateDe } from '../engine/dates';
 import { computeSchedule, type Scenario } from '../engine/schedule';
+import { isVentureDone } from '../engine/validate';
 
 const SEPARATOR = ';';
 const BOM = '﻿';
@@ -154,12 +155,11 @@ function clientToCsv(client: Client, scenario: Scenario): string {
 
   const ventures: Section = {
     title: `Vorhaben - Mandant "${client.name}"`,
-    header: ['Vorhaben', 'Abgeschlossen', 'Aufgaben', 'Beschreibung'],
+    header: ['Vorhaben', 'Abgeschlossen', 'Aufgaben'],
     rows: client.ventures.map((venture) => [
       venture.name,
-      venture.done,
+      isVentureDone(client, venture.id),
       client.tasks.filter((t) => t.ventureId === venture.id).length,
-      venture.description,
     ]),
   };
 

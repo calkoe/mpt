@@ -42,6 +42,22 @@ export interface ScheduledTask {
   openEnded: boolean;
 }
 
+/**
+ * Wie weit Dauerläufer über das Projektende hinaus **dargestellt** werden.
+ * Gerechnet wird weiter bis `horizonEnd` (zehn Jahre), gezeigt wird nur dieses
+ * Stück - danach steht das Unendlichzeichen. Beide Diagramme skalieren auf
+ * diesen Wert, sonst quetscht ein einzelner Dauerläufer das ganze Projekt in
+ * den linken Rand.
+ */
+export const DISPLAY_TAIL_DAYS = 40;
+
+/**
+ * Wie weit die Zeitachsen vor den heutigen Tag zurückreichen. Ein Plan, der
+ * exakt heute beginnt, wirkt abgeschnitten - und was gerade eben war, gehört
+ * zum Bild dazu.
+ */
+export const DISPLAY_LEAD_DAYS = 21;
+
 export interface ScheduleResult {
   /** Ergebnis je Aufgaben-Id. */
   byId: Map<Id, ScheduledTask>;
@@ -53,6 +69,18 @@ export interface ScheduleResult {
   horizonStart: IsoDate;
   horizonEnd: IsoDate;
   projectEnd: IsoDate;
+  /**
+   * Ende des sinnvoll darstellbaren Zeitraums: Projektende plus ein kurzes
+   * Stück für die Dauerläufer. Für Achsen und Zoomstufen ist das der
+   * maßgebliche Wert, nicht `horizonEnd`.
+   */
+  displayEnd: IsoDate;
+  /**
+   * Beginn der Zeitachsen: etwas vor heute bzw. vor dem frühesten Termin.
+   * Zusammen mit `displayEnd` beschreibt das genau den Ausschnitt, auf den
+   * sich die Diagramme beim Öffnen einstellen.
+   */
+  displayStart: IsoDate;
 }
 
 /**
@@ -297,7 +325,10 @@ export function computeSchedule(client: Client, scenario: Scenario = 'max'): Sch
   }
 
   const ordered = order.map((t) => byId.get(t.id)!).filter(Boolean);
-  return { byId, ordered, cycles, horizonStart, horizonEnd, projectEnd };
+  const displayEnd = hasOpenEnded ? addDays(projectEnd, DISPLAY_TAIL_DAYS) : projectEnd;
+  const leadIn = addDays(today(), -DISPLAY_LEAD_DAYS);
+  const displayStart = diffDays(leadIn, horizonStart) > 0 ? leadIn : horizonStart;
+  return { byId, ordered, cycles, horizonStart, horizonEnd, projectEnd, displayEnd, displayStart };
 }
 
 /** Startdatum, sodass [start, end] genau `duration` Arbeitstage umfasst. */

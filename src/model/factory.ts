@@ -53,7 +53,7 @@ export function nextTagColor(existing: Tag[]): string {
 }
 
 export function createVenture(name = 'Neues Vorhaben'): Venture {
-  return { id: newId('ven'), name, description: '', done: false };
+  return { id: newId('ven'), name };
 }
 
 export function createTask(ventureId: Id, title = 'Neue Aufgabe', start?: IsoDate): Task {
@@ -62,7 +62,6 @@ export function createTask(ventureId: Id, title = 'Neue Aufgabe', start?: IsoDat
     ventureId,
     title,
     description: '',
-    notes: '',
     checklist: [],
     status: 'open',
     milestone: false,
@@ -102,12 +101,40 @@ export function createPredecessor(source: Task, title = 'Vorgänger'): Task {
   return task;
 }
 
+/**
+ * Kopie einer Aufgabe.
+ *
+ * Übernommen wird alles Inhaltliche - Beschreibung, Checkliste, Termine,
+ * Ressourcen, Kosten, Tags und Bedingungen. Auch die Vorgänger bleiben, damit
+ * die Kopie an derselben Stelle im Netz hängt. Nicht übernommen werden die
+ * Nachfolger (die zeigen weiter auf das Original) und die Handverschiebung im
+ * Netzplan; die Kopie startet leicht versetzt daneben.
+ *
+ * Alle enthaltenen Ids werden neu vergeben, sonst teilten sich Original und
+ * Kopie ihre Zuordnungen.
+ */
+export function duplicateTask(source: Task, title = `${source.title} (Kopie)`): Task {
+  return {
+    ...structuredClone(source),
+    id: newId('tsk'),
+    title,
+    layout: { dx: 24, dy: 24 },
+    checklist: source.checklist.map((c) => ({ ...c, id: newId('chk') })),
+    assignments: source.assignments.map((a) => ({
+      ...a,
+      id: newId('asg'),
+      periods: a.periods.map((p) => ({ ...p, id: newId('prd') })),
+    })),
+    costs: source.costs.map((c) => ({ ...c, id: newId('cst') })),
+  };
+}
+
 export function createPerson(name = 'Neue Person'): Person {
-  return { id: newId('per'), name, role: '', availability: [], defaultFte: 1 };
+  return { id: newId('per'), name, role: '', availability: [], defaultFte: 1, tagIds: [] };
 }
 
 export function createBudget(name = 'Neues Budget'): Budget {
-  return { id: newId('bud'), name, limits: [], totalLimit: 0 };
+  return { id: newId('bud'), name, kind: 'neutral', limits: [], totalLimit: 0, tagIds: [] };
 }
 
 export function createTag(name: string, existing: Tag[]): Tag {
@@ -119,11 +146,21 @@ export function createCondition(name = 'Neue Bedingung'): Condition {
 }
 
 export function createAssignment(personId: Id): PersonAssignment {
-  return { id: newId('asg'), personId, mode: 'FTE', value: 0.5 };
+  return { id: newId('asg'), personId, mode: 'FTE', value: 0.5, periods: [] };
 }
 
 export function createCost(budgetId: Id): CostItem {
-  return { id: newId('cst'), budgetId, label: 'Kostenposition', amount: 1000, recurring: false, interval: 'month', every: 1 };
+  return {
+    id: newId('cst'),
+    budgetId,
+    label: 'Kostenposition',
+    amount: 1000,
+    actualAmount: 0,
+    note: '',
+    recurring: false,
+    interval: 'month',
+    every: 1,
+  };
 }
 
 export function createChecklistItem(text = ''): ChecklistItem {
@@ -159,9 +196,7 @@ export function createDemoClient(): Client {
   const start = nextWorkday(today());
 
   const vPlanung = createVenture('Plattform-Aufbau');
-  vPlanung.description = 'Aufbau und Inbetriebnahme der neuen Plattform.';
   const vBetrieb = createVenture('Betrieb');
-  vBetrieb.description = 'Dauerhafte Leistungen nach Inbetriebnahme.';
   client.ventures = [vPlanung, vBetrieb];
 
   const anna = createPerson('Anna Berger');
@@ -174,9 +209,11 @@ export function createDemoClient(): Client {
   client.people = [anna, bo];
 
   const invest = createBudget('Investitionsbudget');
+  invest.kind = 'investment';
   invest.limits = [createPeriodValue(250_000, `${new Date().getFullYear()}-01-01`, `${new Date().getFullYear()}-12-31`)];
   invest.totalLimit = 400_000;
   const betriebBudget = createBudget('Betriebskosten');
+  betriebBudget.kind = 'order';
   client.budgets = [invest, betriebBudget];
 
   const tagInfra = createTag('Infrastruktur', client.tags);

@@ -2,13 +2,27 @@
  * Editoren für Personen und Budgets, inklusive der zeitraumabhängigen
  * Grenzwerte (verfügbare FTE bzw. Budget-Obergrenzen je Zeitraum).
  */
-import type { Budget, Id, PeriodValue, Person, Task } from '../../model/types';
-import { createPeriodValue } from '../../model/factory';
+import { BUDGET_KIND_LABEL, type Budget, type BudgetKind, type Id, type PeriodValue, type Person, type Task } from '../../model/types';
+import { createPeriodValue, createTag } from '../../model/factory';
 import { formatDateDe } from '../../engine/dates';
 import type { ScheduleResult } from '../../engine/schedule';
 import type { Warning } from '../../engine/validate';
 import { useStore } from '../../state/store';
-import { AmountInput, Badge, Button, ConfirmButton, DateInput, Field, NumberSlider, TextInput } from '../components/controls';
+import {
+  AmountInput,
+  Badge,
+  Button,
+  Chip,
+  Combobox,
+  ConfirmButton,
+  Field,
+  NumberSlider,
+  Segmented,
+  TextInput,
+} from '../components/controls';
+import { PeriodPicker } from '../components/PeriodPicker';
+import { CostFields } from '../components/CostFields';
+import { formatValue } from '../../engine/resources';
 
 export function PersonEditor({
   person,
@@ -48,15 +62,29 @@ export function PersonEditor({
               onChange={(role) => edit('Rolle geändert', (p) => { p.role = role; }, `person-role-${person.id}`)}
             />
           </Field>
+          {/* 1,0 FTE ist eine volle Stelle - mehr kann eine Person nicht sein. */}
           <Field label="Verfügbare FTE (Standard)" hint="Gilt, wenn kein Zeitraum unten greift">
             <NumberSlider
               min={0}
-              max={2}
-              step={0.05}
+              max={1}
+              step={0.1}
               value={person.defaultFte}
               onChange={(defaultFte) => edit('Verfügbarkeit geändert', (p) => { p.defaultFte = defaultFte; }, `person-fte-${person.id}`)}
             />
           </Field>
+
+          <ResourceTags
+            tagIds={person.tagIds}
+            onAdd={(id) => edit('Tag ergänzt', (p) => { if (!p.tagIds.includes(id)) p.tagIds.push(id); })}
+            onRemove={(id) => edit('Tag entfernt', (p) => { p.tagIds = p.tagIds.filter((t) => t !== id); })}
+            onCreate={(name) =>
+              commitClient('Tag angelegt', (c) => {
+                const tag = createTag(name, c.tags);
+                c.tags.push(tag);
+                c.people.find((x) => x.id === person.id)?.tagIds.push(tag.id);
+              })
+            }
+          />
         </div>
 
         <div className="editor__section">
@@ -106,16 +134,8 @@ export function PersonEditor({
   );
 }
 
-export function BudgetEditor({
-  budget,
-  tasks,
-  schedule,
-}: {
-  budget: Budget;
-  tasks: Task[];
-  schedule: ScheduleResult;
-}) {
-  const { commitClient, setUi } = useStore();
+export function BudgetEditor({ budget, tasks }: { budget: Budget; tasks: Task[] }) {
+  const { commitClient } = useStore();
 
   const edit = (label: string, recipe: (b: Budget) => void, coalesceKey?: string) =>
     commitClient(label, (c) => {
@@ -123,7 +143,12 @@ export function BudgetEditor({
       if (target) recipe(target);
     }, coalesceKey ? { coalesceKey } : undefined);
 
-  const linked = tasks.filter((t) => t.costs.some((c) => c.budgetId === budget.id));
+  /** Alle Kostenpositionen, die auf dieses Budget zeigen - mit ihrer Aufgabe. */
+  const costItems = tasks.flatMap((task) =>
+    task.costs.filter((c) => c.budgetId === budget.id).map((cost) => ({ task, cost })),
+  );
+  const plannedSum = costItems.reduce((s, { cost }) => s + cost.amount, 0);
+  const actualSum = costItems.reduce((s, { cost }) => s + cost.actualAmount, 0);
 
   return (
     <div className="editor">
@@ -136,6 +161,33 @@ export function BudgetEditor({
 
       <div className="editor__cols">
         <div className="editor__section">
+          {/* Die Art trennt die Gesamtsummen in der Uebersicht. */}
+          <Field label="Art des Budgets">
+            <Segmented<BudgetKind>
+              block
+              ariaLabel="Art des Budgets"
+              value={budget.kind}
+              onChange={(kind) => edit('Budgetart geändert', (b) => { b.kind = kind; })}
+              options={(Object.keys(BUDGET_KIND_LABEL) as BudgetKind[]).map((k) => ({
+                value: k,
+                label: BUDGET_KIND_LABEL[k],
+              }))}
+            />
+          </Field>
+
+          <ResourceTags
+            tagIds={budget.tagIds}
+            onAdd={(id) => edit('Tag ergänzt', (b) => { if (!b.tagIds.includes(id)) b.tagIds.push(id); })}
+            onRemove={(id) => edit('Tag entfernt', (b) => { b.tagIds = b.tagIds.filter((t) => t !== id); })}
+            onCreate={(name) =>
+              commitClient('Tag angelegt', (c) => {
+                const tag = createTag(name, c.tags);
+                c.tags.push(tag);
+                c.budgets.find((x) => x.id === budget.id)?.tagIds.push(tag.id);
+              })
+            }
+          />
+
           <div className="editor__section-title">Obergrenze gesamt</div>
           <Field label="Über die gesamte Laufzeit" hint="0 = keine Obergrenze">
             <AmountInput value={budget.totalLimit} onChange={(totalLimit) => edit('Obergrenze geändert', (b) => { b.totalLimit = totalLimit; }, `budget-total-${budget.id}`)} />
@@ -163,31 +215,51 @@ export function BudgetEditor({
         </div>
 
         <div className="editor__section">
-          <div className="editor__section-title">Verknüpfte Aufgaben ({linked.length})</div>
-          <div className="list">
-            {linked.map((task) => {
-              const st = schedule.byId.get(task.id);
-              const costs = task.costs.filter((c) => c.budgetId === budget.id);
-              return (
-                <button
-                  key={task.id}
-                  type="button"
-                  className="list__item"
-                  onClick={() => setUi({ mode: 'tasks', selectedTaskId: task.id, ventureId: task.ventureId })}
-                >
-                  <span className={`status-dot status-dot--${task.status}`} />
-                  <span className="grow truncate">{task.title}</span>
-                  <span className="faint nowrap">
-                    {costs
-                      .map((c) => `${c.amount.toLocaleString('de-DE')} €${c.recurring ? ` / ${c.every}` : ''}`)
-                      .join(', ')}
-                  </span>
-                  <span className="faint nowrap">{st ? formatDateDe(st.start) : ''}</span>
-                </button>
-              );
-            })}
-            {linked.length === 0 && <span className="faint">Keine Kosten zugeordnet.</span>}
+          <div className="editor__section-title">Kosten dieses Budgets ({costItems.length})</div>
+          {/*
+            Dieselben Felder wie im Aufgaben-Editor, nur aus der anderen
+            Richtung: dort steht das Budget in der Ueberschrift, hier die
+            Aufgabe. Ein Bauteil fuer beide - siehe CostFields.
+          */}
+          <div className="col">
+            {costItems.map(({ task, cost }) => (
+              <CostFields
+                key={cost.id}
+                cost={cost}
+                caption={task.title}
+                onEdit={(label, recipe, coalesceKey) =>
+                  commitClient(label, (c) => {
+                    const target = c.tasks.find((t) => t.id === task.id)?.costs.find((x) => x.id === cost.id);
+                    if (target) recipe(target);
+                  }, coalesceKey ? { coalesceKey } : undefined)
+                }
+                onRemove={() =>
+                  commitClient('Kostenposition entfernt', (c) => {
+                    const target = c.tasks.find((t) => t.id === task.id);
+                    if (target) target.costs = target.costs.filter((x) => x.id !== cost.id);
+                  })
+                }
+              />
+            ))}
+            {costItems.length === 0 && <span className="faint">Keine Kosten zugeordnet.</span>}
           </div>
+
+          {costItems.length > 0 && (
+            <div className="totals">
+              <div className="totals__row">
+                <span className="faint">geplant</span>
+                <span className="mono">{formatValue(plannedSum, 'EUR')}</span>
+              </div>
+              <div className="totals__row">
+                <span className="faint">abgerufen</span>
+                <span className="mono">{formatValue(actualSum, 'EUR')}</span>
+              </div>
+              <div className="totals__row totals__row--sum">
+                <span>offen</span>
+                <span className="mono">{formatValue(plannedSum - actualSum, 'EUR')}</span>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -226,16 +298,14 @@ function PeriodValueList({
         {entries.map((entry) => (
           <div key={entry.id} className="line-item">
             <div className="col">
-              <div className="row row--wrap">
-                <Field label="von">
-                  <DateInput value={entry.from} onChange={(from) => onChange(entry.id, { from: from || undefined })} />
-                </Field>
-                <Field label="bis">
-                  <DateInput value={entry.to} onChange={(to) => onChange(entry.id, { to: to || undefined })} />
-                </Field>
-              </div>
+              {/* Quartal oder Jahr genuegt - taggenau wird hier nicht geplant. */}
+              <PeriodPicker
+                from={entry.from}
+                to={entry.to}
+                onChange={(from, to) => onChange(entry.id, { from, to })}
+              />
               {unit === 'FTE' ? (
-                <NumberSlider min={0} max={2} step={0.05} value={entry.value} suffix="FTE" onChange={(value) => onChange(entry.id, { value })} />
+                <NumberSlider min={0} max={1} step={0.1} value={entry.value} suffix="FTE" onChange={(value) => onChange(entry.id, { value })} />
               ) : (
                 <AmountInput value={entry.value} onChange={(value) => onChange(entry.id, { value })} />
               )}
@@ -247,6 +317,51 @@ function PeriodValueList({
         ))}
         {entries.length === 0 && <span className="faint" style={{ fontSize: 'var(--fs-sm)' }}>Keine Zeiträume definiert.</span>}
       </div>
+    </>
+  );
+}
+
+/**
+ * Tags an einer Ressource. Personen und Budgets nutzen denselben Block, damit
+ * das Zuordnen sich überall gleich anfühlt - und dieselbe `Combobox` wie bei
+ * Aufgaben, inklusive "beim Tippen neu anlegen".
+ */
+function ResourceTags({
+  tagIds,
+  onAdd,
+  onRemove,
+  onCreate,
+}: {
+  tagIds: Id[];
+  onAdd: (id: Id) => void;
+  onRemove: (id: Id) => void;
+  onCreate: (name: string) => void;
+}) {
+  const { client } = useStore();
+  const tagById = new Map(client.tags.map((t) => [t.id, t]));
+
+  return (
+    <>
+      <div className="editor__section-title">Tags</div>
+      <div className="row row--wrap">
+        {tagIds.map((id) => {
+          const tag = tagById.get(id);
+          return tag ? (
+            <Chip key={id} label={tag.name} color={tag.color} onRemove={() => onRemove(id)} />
+          ) : null;
+        })}
+        {tagIds.length === 0 && (
+          <span className="faint" style={{ fontSize: 'var(--fs-sm)' }}>Keine Tags.</span>
+        )}
+      </div>
+      <Combobox
+        placeholder="Tag wählen oder anlegen..."
+        options={client.tags
+          .filter((t) => !tagIds.includes(t.id))
+          .map((t) => ({ id: t.id, label: t.name, color: t.color }))}
+        onSelect={onAdd}
+        onCreate={onCreate}
+      />
     </>
   );
 }

@@ -8,10 +8,8 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  COST_INTERVAL_LABEL,
   TASK_STATUS_LABEL,
   type Client,
-  type CostInterval,
   type Id,
   type Task,
   type TaskStatus,
@@ -23,6 +21,7 @@ import {
   createCondition,
   createCost,
   createFollowUp,
+  createPeriodValue,
   createPerson,
   createTag,
 } from '../../model/factory';
@@ -39,10 +38,9 @@ import {
   type DurationUnit,
 } from '../../engine/dates';
 import { wouldCreateCycle, type ScheduleResult } from '../../engine/schedule';
-import type { Warning } from '../../engine/validate';
+import { isVentureDone, type Warning } from '../../engine/validate';
 import { useStore } from '../../state/store';
 import {
-  AmountInput,
   Badge,
   Button,
   Chip,
@@ -56,6 +54,8 @@ import {
   TextArea,
   TextInput,
 } from '../components/controls';
+import { PeriodPicker, periodBounds } from '../components/PeriodPicker';
+import { CostFields } from '../components/CostFields';
 
 export function TaskEditor({
   client,
@@ -134,77 +134,60 @@ export function TaskEditor({
         onChange={(description) => edit('Beschreibung geändert', (t) => { t.description = description; }, `desc-${task.id}`)}
       />
 
-      <div className="row row--wrap">
-        <span className="faint" style={{ fontSize: 'var(--fs-sm)' }}>
-          {st
-            ? `Berechnet: ${formatDateDe(st.start)} → ${st.openEnded ? 'offen' : formatDateDe(st.end)} · ${st.duration} Arbeitstage · Puffer ${st.slack} AT`
-            : 'Nicht terminierbar'}
-        </span>
-        {st?.critical && !st.openEnded && <Badge tone="critical">kritischer Pfad</Badge>}
-        {st?.cyclic && <Badge tone="critical">Zyklus</Badge>}
+      {/* Checkliste steht direkt unter der Kurzbeschreibung - beides beschreibt
+          den Inhalt der Aufgabe und gehoert zusammen. */}
+      <div className="editor__section-title">
+        Checkliste
+        <span className="spacer" />
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() => edit('Checklistenpunkt ergänzt', (t) => { t.checklist.push(createChecklistItem()); })}
+        >
+          + Punkt
+        </Button>
       </div>
-
-      <div className="editor__cols">
-        {/* Checkliste + Freitext */}
-        <div className="editor__section">
-          <div className="editor__section-title">
-            Checkliste
-            <span className="spacer" />
+      <div className="col">
+        {task.checklist.map((item) => (
+          <div key={item.id} className={`checklist__item${item.done ? ' checklist__item--done' : ''}`}>
+            <input
+              type="checkbox"
+              checked={item.done}
+              aria-label="Erledigt"
+              onChange={(e) =>
+                edit('Checkliste aktualisiert', (t) => {
+                  const target = t.checklist.find((c) => c.id === item.id);
+                  if (target) target.done = e.target.checked;
+                })
+              }
+            />
+            {/* TextInput statt rohem input: nur so greift die verzoegerte
+                Uebernahme und es wird nicht pro Tastendruck committet. */}
+            <TextInput
+              className="checklist__text"
+              value={item.text}
+              placeholder="Punkt..."
+              onChange={(text) =>
+                edit('Checkliste bearbeitet', (t) => {
+                  const target = t.checklist.find((c) => c.id === item.id);
+                  if (target) target.text = text;
+                }, `chk-${item.id}`)
+              }
+            />
             <Button
               size="sm"
               variant="ghost"
-              onClick={() => edit('Checklistenpunkt ergänzt', (t) => { t.checklist.push(createChecklistItem()); })}
+              title="Punkt entfernen"
+              onClick={() => edit('Checklistenpunkt entfernt', (t) => { t.checklist = t.checklist.filter((c) => c.id !== item.id); })}
             >
-              + Punkt
+              &times;
             </Button>
           </div>
-          <div className="col">
-            {task.checklist.map((item) => (
-              <div key={item.id} className={`checklist__item${item.done ? ' checklist__item--done' : ''}`}>
-                <input
-                  type="checkbox"
-                  checked={item.done}
-                  aria-label="Erledigt"
-                  onChange={(e) =>
-                    edit('Checkliste aktualisiert', (t) => {
-                      const target = t.checklist.find((c) => c.id === item.id);
-                      if (target) target.done = e.target.checked;
-                    })
-                  }
-                />
-                <input
-                  type="text"
-                  value={item.text}
-                  placeholder="Punkt..."
-                  onChange={(e) =>
-                    edit('Checkliste bearbeitet', (t) => {
-                      const target = t.checklist.find((c) => c.id === item.id);
-                      if (target) target.text = e.target.value;
-                    }, `chk-${item.id}`)
-                  }
-                />
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  title="Punkt entfernen"
-                  onClick={() => edit('Checklistenpunkt entfernt', (t) => { t.checklist = t.checklist.filter((c) => c.id !== item.id); })}
-                >
-                  &times;
-                </Button>
-              </div>
-            ))}
-            {task.checklist.length === 0 && <span className="faint" style={{ fontSize: 'var(--fs-sm)' }}>Keine Punkte.</span>}
-          </div>
+        ))}
+        {task.checklist.length === 0 && <span className="faint" style={{ fontSize: 'var(--fs-sm)' }}>Keine Punkte.</span>}
+      </div>
 
-          <div className="editor__section-title">Freitext</div>
-          <TextArea
-            rows={6}
-            value={task.notes}
-            placeholder="Ausführliche Notizen, Protokolle, Links..."
-            onChange={(notes) => edit('Freitext geändert', (t) => { t.notes = notes; }, `notes-${task.id}`)}
-          />
-        </div>
-
+      <div className="editor__cols">
         {/* Termine */}
         <div className="editor__section">
           <div className="editor__section-title">Terminierung</div>
@@ -403,6 +386,8 @@ export function TaskEditor({
                   id: t.id,
                   label: t.title,
                   hint: client.ventures.find((v) => v.id === t.ventureId)?.name,
+                  // Aufgaben desselben Vorhabens stehen oben.
+                  group: t.ventureId === task.ventureId ? 'Dieses Vorhaben' : undefined,
                   disabled: cycle,
                   disabledReason: 'Würde einen Abhängigkeitszyklus erzeugen.',
                 };
@@ -447,7 +432,12 @@ export function TaskEditor({
             placeholder="Parallel laufende Aufgabe..."
             options={client.tasks
               .filter((t) => t.id !== task.id && !task.parallelWith.includes(t.id))
-              .map((t) => ({ id: t.id, label: t.title }))}
+              .map((t) => ({
+                id: t.id,
+                label: t.title,
+                hint: client.ventures.find((v) => v.id === t.ventureId)?.name,
+                group: t.ventureId === task.ventureId ? 'Dieses Vorhaben' : undefined,
+              }))}
             onSelect={(id) => edit('Parallelität ergänzt', (t) => { if (!t.parallelWith.includes(id)) t.parallelWith.push(id); })}
           />
 
@@ -459,7 +449,7 @@ export function TaskEditor({
                 <Chip
                   key={id}
                   label={`Vorhaben: ${venture?.name ?? '?'}`}
-                  color={venture?.done ? 'var(--ok)' : 'var(--warn)'}
+                  color={venture && isVentureDone(client, venture.id) ? 'var(--ok)' : 'var(--warn)'}
                   onRemove={() => edit('Startbedingung entfernt', (t) => { t.ventureConditions = t.ventureConditions.filter((x) => x !== id); })}
                 />
               );
@@ -542,7 +532,7 @@ export function TaskEditor({
                       <NumberSlider
                         min={0}
                         max={assignment.mode === 'FTE' ? 1 : 200}
-                        step={assignment.mode === 'FTE' ? 0.05 : 1}
+                        step={assignment.mode === 'FTE' ? 0.1 : 1}
                         value={assignment.value}
                         onChange={(value) =>
                           edit('Aufwand geändert', (t) => {
@@ -553,6 +543,78 @@ export function TaskEditor({
                       />
                     </div>
                   </div>
+
+                  {/*
+                    Abweichende Bedarfe je Zeitraum. Ohne Eintrag gilt der
+                    Grundwert oben fuer die ganze Aufgabe - der Normalfall
+                    bleibt also ein einziger Regler.
+                  */}
+                  {assignment.periods.map((period) => (
+                    <div key={period.id} className="row row--wrap subperiod">
+                      <PeriodPicker
+                        from={period.from}
+                        to={period.to}
+                        onChange={(from, to) =>
+                          edit('Bedarfszeitraum geändert', (t) => {
+                            const p = t.assignments
+                              .find((a) => a.id === assignment.id)
+                              ?.periods.find((x) => x.id === period.id);
+                            if (p) {
+                              p.from = from;
+                              p.to = to;
+                            }
+                          })
+                        }
+                      />
+                      <div style={{ minWidth: 140, flex: 1 }}>
+                        <NumberSlider
+                          min={0}
+                          max={assignment.mode === 'FTE' ? 1 : 200}
+                          step={assignment.mode === 'FTE' ? 0.1 : 1}
+                          value={period.value}
+                          suffix={assignment.mode}
+                          onChange={(value) =>
+                            edit('Bedarfszeitraum geändert', (t) => {
+                              const p = t.assignments
+                                .find((a) => a.id === assignment.id)
+                                ?.periods.find((x) => x.id === period.id);
+                              if (p) p.value = value;
+                            }, `per-${period.id}`)
+                          }
+                        />
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        icon
+                        title="Zeitraum entfernen"
+                        onClick={() =>
+                          edit('Bedarfszeitraum entfernt', (t) => {
+                            const a = t.assignments.find((x) => x.id === assignment.id);
+                            if (a) a.periods = a.periods.filter((x) => x.id !== period.id);
+                          })
+                        }
+                      >
+                        &times;
+                      </Button>
+                    </div>
+                  ))}
+
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    title="Abweichenden Bedarf für einen Zeitraum festlegen"
+                    onClick={() =>
+                      edit('Bedarfszeitraum ergänzt', (t) => {
+                        const a = t.assignments.find((x) => x.id === assignment.id);
+                        if (!a) return;
+                        const bounds = defaultPeriodFor(st?.start);
+                        a.periods.push({ ...createPeriodValue(a.value, bounds.from, bounds.to) });
+                      })
+                    }
+                  >
+                    + Zeitraum
+                  </Button>
                 </div>
                 <Button
                   variant="ghost"
@@ -583,90 +645,27 @@ export function TaskEditor({
 
           <div className="editor__section-title">Kosten</div>
           <div className="col">
+            {/* Dieselben Felder wie in der Budgetansicht - siehe CostFields. */}
             {task.costs.map((cost) => (
-              <div key={cost.id} className="line-item">
-                <div className="col">
-                  {/* Das Budget steht als Überschrift darüber, damit die
-                      Bezeichnung die volle Breite bekommt. */}
-                  <div className="line-item__caption truncate">{budgetById.get(cost.budgetId)?.name}</div>
-                  <TextInput
-                    value={cost.label}
-                    placeholder="Bezeichnung"
-                    onChange={(label) =>
-                      edit('Kostenposition bearbeitet', (t) => {
-                        const target = t.costs.find((c) => c.id === cost.id);
-                        if (target) target.label = label;
-                      }, `cost-label-${cost.id}`)
-                    }
-                  />
-                  <div className="line-item__controls">
-                    <AmountInput
-                      value={cost.amount}
-                      onChange={(amount) =>
-                        edit('Betrag geändert', (t) => {
-                          const target = t.costs.find((c) => c.id === cost.id);
-                          if (target) target.amount = amount;
-                        }, `cost-amount-${cost.id}`)
-                      }
-                    />
-                    <Switch
-                      checked={cost.recurring}
-                      label="wiederkehrend"
-                      onChange={(recurring) =>
-                        edit('Kostenart geändert', (t) => {
-                          const target = t.costs.find((c) => c.id === cost.id);
-                          if (target) target.recurring = recurring;
-                        })
-                      }
-                    />
-                    {cost.recurring && (
-                      <div className="row">
-                        <span className="faint">alle</span>
-                        <input
-                          className="input input--num"
-                          style={{ width: 56 }}
-                          type="number"
-                          min={1}
-                          value={cost.every}
-                          onChange={(e) =>
-                            edit('Intervall geändert', (t) => {
-                              const target = t.costs.find((c) => c.id === cost.id);
-                              if (target) target.every = Math.max(1, Number(e.target.value) || 1);
-                            }, `cost-every-${cost.id}`)
-                          }
-                        />
-                        <select
-                          className="select"
-                          style={{ width: 118 }}
-                          value={cost.interval}
-                          onChange={(e) =>
-                            edit('Intervall geändert', (t) => {
-                              const target = t.costs.find((c) => c.id === cost.id);
-                              if (target) target.interval = e.target.value as CostInterval;
-                            })
-                          }
-                        >
-                          {(Object.keys(COST_INTERVAL_LABEL) as CostInterval[]).map((interval) => (
-                            <option key={interval} value={interval}>
-                              {COST_INTERVAL_LABEL[interval]}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    )}
-                  </div>
-                </div>
-                <Button
-                  variant="ghost"
-                  icon
-                  title="Kostenposition entfernen"
-                  onClick={() => edit('Kostenposition entfernt', (t) => { t.costs = t.costs.filter((c) => c.id !== cost.id); })}
-                >
-                  &times;
-                </Button>
-              </div>
+              <CostFields
+                key={cost.id}
+                cost={cost}
+                caption={budgetById.get(cost.budgetId)?.name ?? 'Unbekanntes Budget'}
+                onEdit={(label, recipe, coalesceKey) =>
+                  edit(label, (t) => {
+                    const target = t.costs.find((c) => c.id === cost.id);
+                    if (target) recipe(target);
+                  }, coalesceKey)
+                }
+                onRemove={() =>
+                  edit('Kostenposition entfernt', (t) => {
+                    t.costs = t.costs.filter((c) => c.id !== cost.id);
+                  })
+                }
+              />
             ))}
           </div>
+
           <Combobox
             placeholder="Budget wählen oder anlegen..."
             options={client.budgets.map((b) => ({ id: b.id, label: b.name }))}
@@ -684,6 +683,14 @@ export function TaskEditor({
       </div>
     </div>
   );
+}
+
+/** Vorschlag fuer einen neuen Bedarfszeitraum: das Quartal des Aufgabenstarts. */
+function defaultPeriodFor(start?: string): { from: string; to: string } {
+  const iso = start ?? new Date().toISOString().slice(0, 10);
+  const year = Number(iso.slice(0, 4));
+  const quarter = Math.floor((Number(iso.slice(5, 7)) - 1) / 3) + 1;
+  return periodBounds(year, quarter);
 }
 
 /** Passende Eingabeeinheit zu einer Dauer in Arbeitstagen. */
@@ -723,13 +730,16 @@ function durationHint(task: Task, workdays: number): string {
 export function TaskEditorHeader({
   client,
   task,
+  schedule,
   warnings,
 }: {
   client: Client;
   task: Task;
+  schedule: ScheduleResult;
   warnings: Warning[];
 }) {
   const { commitClient, setUi } = useStore();
+  const st = schedule.byId.get(task.id);
 
   const descendants = useMemo(() => {
     const result = new Set<Id>();
@@ -766,6 +776,16 @@ export function TaskEditorHeader({
   return (
     <>
       <span className="panel__title">Aufgabe bearbeiten</span>
+
+      {/* Das Rechenergebnis gehoert neben die Ueberschrift: es beschreibt die
+          Aufgabe als Ganzes und stand vorher mitten im Formular. */}
+      <span className="faint nowrap" style={{ fontSize: 'var(--fs-sm)' }}>
+        {st
+          ? `${formatDateDe(st.start)} → ${st.openEnded ? 'offen' : formatDateDe(st.end)} · ${st.duration} AT · Puffer ${st.slack} AT`
+          : 'Nicht terminierbar'}
+      </span>
+      {st?.critical && !st.openEnded && <Badge tone="critical">kritischer Pfad</Badge>}
+      {st?.cyclic && <Badge tone="critical">Zyklus</Badge>}
 
       {/* Warnungen dürfen schrumpfen und scrollen, damit die Knöpfe rechts
           immer erreichbar bleiben. */}

@@ -30,10 +30,12 @@ export function useDerived(): Derived {
   const tWarnings = useMemo(() => taskWarnings(client, schedule), [client, schedule]);
   const rWarnings = useMemo(() => resourceWarnings(client, schedule), [client, schedule]);
 
-  const ventureTasks = useMemo(
-    () => (ui.ventureId ? client.tasks.filter((t) => t.ventureId === ui.ventureId) : client.tasks),
-    [client.tasks, ui.ventureId],
-  );
+  const ventureTasks = useMemo(() => {
+    const byVenture = ui.ventureId ? client.tasks.filter((t) => t.ventureId === ui.ventureId) : client.tasks;
+    // Tag-Filter wirkt zusaetzlich zum Vorhaben - leer heisst "alle".
+    if (ui.tagFilter.length === 0) return byVenture;
+    return byVenture.filter((t) => t.tagIds.some((id) => ui.tagFilter.includes(id)));
+  }, [client.tasks, ui.ventureId, ui.tagFilter]);
 
   const visibleTasks = useMemo(() => {
     // Ohne Auswahl oder bei vollem Tiefengrad: alle Aufgaben des Vorhabens.

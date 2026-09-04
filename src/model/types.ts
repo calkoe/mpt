@@ -16,20 +16,36 @@ export type IsoDateTime = string;
 
 export type Id = string;
 
-export const CURRENT_SCHEMA_VERSION = 2;
+export const CURRENT_SCHEMA_VERSION = 4;
 
 // ---------------------------------------------------------------------------
 // Aufgaben
 // ---------------------------------------------------------------------------
 
-export type TaskStatus = "open" | "active" | "blocked" | "done";
+/**
+ * `operations` = Betrieb: die Aufgabe ist inhaltlich fertig, bindet aber
+ * dauerhaft Ressourcen (Wartung, Hosting, Support). Fachlich zählt sie wie
+ * `done` - siehe `isSettled()`.
+ */
+export type TaskStatus = "open" | "active" | "operations" | "done";
 
 export const TASK_STATUS_LABEL: Record<TaskStatus, string> = {
   open: "Offen",
   active: "In Arbeit",
-  blocked: "Blockiert",
+  operations: "Betrieb",
   done: "Abgeschlossen",
 };
+
+/**
+ * Gilt die Aufgabe als erledigt? `done` und `operations` verhalten sich
+ * gegenüber Nachfolgern, Vorhabenstatus und Terminwarnungen gleich - der
+ * Unterschied liegt allein darin, dass `operations` weiter Ressourcen bindet.
+ *
+ * Einzige Quelle der Wahrheit; nie direkt auf `=== 'done'` prüfen.
+ */
+export function isSettled(status: TaskStatus): boolean {
+  return status === "done" || status === "operations";
+}
 
 /**
  * Terminierung einer Aufgabe.
@@ -67,15 +83,31 @@ export function isOpenEnded(schedule: TaskSchedule): boolean {
   return schedule.durationMax <= 0 && !schedule.end;
 }
 
+/** Relative Verschiebung eines Netzplan-Knotens gegenüber dem Auto-Layout. */
+export interface NodeOffset {
+  dx: number;
+  dy: number;
+}
+
 export type PersonAssignmentMode = "PT" | "FTE";
 
-/** Bindung einer Personalressource an eine Aufgabe. */
+/**
+ * Bindung einer Personalressource an eine Aufgabe.
+ *
+ * `value` ist der Grundwert und gilt über die ganze Aufgabenlaufzeit. Einzelne
+ * Zeiträume in `periods` überschreiben ihn - dieselbe Mechanik wie bei
+ * `Person.availability` und `Budget.limits`, ausgewertet über `periodValueAt()`.
+ * Zeiträume ausserhalb der Aufgabenlaufzeit werden beim Rechnen zugeschnitten
+ * und gemeldet.
+ */
 export interface PersonAssignment {
   id: Id;
   personId: Id;
   /** 'PT' = Personentage gesamt, 'FTE' = konstanter Anteil pro Woche (0..1). */
   mode: PersonAssignmentMode;
   value: number;
+  /** Abweichende Bedarfe je Zeitraum; leer = überall `value`. */
+  periods: PeriodValue[];
 }
 
 export type CostInterval = "day" | "week" | "month" | "quarter" | "year";
@@ -97,8 +129,12 @@ export interface CostItem {
   id: Id;
   budgetId: Id;
   label: string;
-  /** Betrag in Euro (pro Fälligkeit). */
+  /** Geplanter Betrag in Euro (pro Fälligkeit). */
   amount: number;
+  /** Tatsächlich abgerufener Betrag in Euro (pro Fälligkeit); 0 = noch nichts. */
+  actualAmount: number;
+  /** Kurze Notiz zu dieser Zuordnung - Bestellnummer, Stand der Abrechnung … */
+  note: string;
   recurring: boolean;
   interval: CostInterval;
   /** Faktor N, z.B. every=3, interval='month' => alle 3 Monate. */
@@ -117,12 +153,17 @@ export interface Task {
   title: string;
   /** Kurzbeschreibung, immer sichtbar. */
   description: string;
-  /** Umfangreiches Freitextfeld, immer sichtbar. */
-  notes: string;
   checklist: ChecklistItem[];
   status: TaskStatus;
   /** Meilenstein: im Netzplan hervorgehoben, im Gantt eine Linie am Ende. */
   milestone: boolean;
+  /**
+   * Handverschiebung im Netzplan, **relativ** zur automatisch berechneten
+   * Position. Dadurch bleibt das Auto-Layout aktiv: ändern sich
+   * Abhängigkeiten, wandert der Knoten mit und behält seinen Versatz.
+   * Fehlt das Feld, sitzt der Knoten genau auf der berechneten Position.
+   */
+  layout?: NodeOffset;
   schedule: TaskSchedule;
   /** Ende->Start-Vorgänger. */
   dependsOn: Id[];
@@ -141,11 +182,17 @@ export interface Task {
 // Vorhaben, Ressourcen, Stammdaten
 // ---------------------------------------------------------------------------
 
+/**
+ * Vorhaben. Ob es abgeschlossen ist, wird **nicht gespeichert**, sondern aus
+ * den Aufgaben abgeleitet (alle erledigt oder im Betrieb) - siehe
+ * `isVentureDone()` in `engine/validate.ts`. Ein gespeicherter Schalter
+ * daneben würde unweigerlich auseinanderlaufen.
+ *
+ * Die Reihenfolge im Array ist die Anzeigereihenfolge und per Ziehen änderbar.
+ */
 export interface Venture {
   id: Id;
   name: string;
-  description: string;
-  done: boolean;
 }
 
 /** Zeitraumabhängiger Wert. `from`/`to` leer => unbegrenzt in diese Richtung. */
@@ -163,15 +210,27 @@ export interface Person {
   /** Verfügbare FTE je Zeitraum. Ohne Eintrag gilt `defaultFte`. */
   availability: PeriodValue[];
   defaultFte: number;
+  tagIds: Id[];
 }
+
+/** Art eines Budgets - trennt die Gesamtsummen in der Übersicht. */
+export type BudgetKind = "neutral" | "order" | "investment";
+
+export const BUDGET_KIND_LABEL: Record<BudgetKind, string> = {
+  neutral: "Neutral",
+  order: "Beauftragung",
+  investment: "Investment",
+};
 
 export interface Budget {
   id: Id;
   name: string;
+  kind: BudgetKind;
   /** Obergrenzen in Euro je Zeitraum (typisch: ein Eintrag pro Kalenderjahr). */
   limits: PeriodValue[];
   /** Obergrenze gesamt über die ganze Laufzeit; 0 = keine. */
   totalLimit: number;
+  tagIds: Id[];
 }
 
 export interface Tag {

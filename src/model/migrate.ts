@@ -17,11 +17,14 @@ import {
   CURRENT_SCHEMA_VERSION,
   MAX_CHECKPOINTS,
   type Budget,
+  type BudgetKind,
   type Client,
   type Condition,
   type CostItem,
   type Database,
   type FileLock,
+  type NodeOffset,
+  type PeriodValue,
   type Person,
   type Tag,
   type Task,
@@ -64,6 +67,56 @@ const MIGRATIONS: Record<number, (db: AnyRecord) => AnyRecord> = {
         delete schedule.openEnded;
         return { ...task, milestone: bool(task?.milestone), schedule };
       }),
+    })),
+  }),
+
+  /**
+   * 2 -> 3: grosser Schnitt. Freitext und Vorhabenbeschreibung entfallen, der
+   * Abschlussstatus des Vorhabens wird abgeleitet statt gespeichert, Personen
+   * und Budgets werden taggbar, Budgets bekommen eine Art, Bedarfe eine
+   * Zeitraumliste und Kosten einen zweiten Betrag.
+   *
+   * `blocked` wird bewusst zu `open` und nicht zu `operations`: der neue
+   * Zustand "Betrieb" zaehlt wie abgeschlossen. Alte blockierte Aufgaben
+   * wuerden dadurch stillschweigend als erledigt gelten - das waere eine
+   * inhaltliche Aussage, die die Datei nie getroffen hat.
+   */
+  2: (db) => ({
+    ...db,
+    schemaVersion: 3,
+    clients: arr(db.clients).map((client) => ({
+      ...client,
+      ventures: arr(client?.ventures).map((venture) => ({
+        id: venture?.id,
+        name: venture?.name,
+      })),
+      people: arr(client?.people).map((person) => ({ ...person, tagIds: arr(person?.tagIds) })),
+      budgets: arr(client?.budgets).map((budget) => ({
+        ...budget,
+        kind: budget?.kind ?? 'neutral',
+        tagIds: arr(budget?.tagIds),
+      })),
+      tasks: arr(client?.tasks).map((task) => {
+        const next = { ...task };
+        delete next.notes;
+        next.status = task?.status === 'blocked' ? 'open' : task?.status;
+        next.assignments = arr(task?.assignments).map((a) => ({ ...a, periods: arr(a?.periods) }));
+        next.costs = arr(task?.costs).map((c) => ({ ...c, actualAmount: num(c?.actualAmount, 0) }));
+        return next;
+      }),
+    })),
+  }),
+
+  /** 3 -> 4: Kostenpositionen bekommen ein Notizfeld. */
+  3: (db) => ({
+    ...db,
+    schemaVersion: 4,
+    clients: arr(db.clients).map((client) => ({
+      ...client,
+      tasks: arr(client?.tasks).map((task) => ({
+        ...task,
+        costs: arr(task?.costs).map((c) => ({ ...c, note: str(c?.note) })),
+      })),
     })),
   }),
 };
@@ -113,7 +166,8 @@ export function migrate(raw: unknown): MigrationResult {
 // Normalisierung
 // ---------------------------------------------------------------------------
 
-const STATUSES: TaskStatus[] = ['open', 'active', 'blocked', 'done'];
+const STATUSES: TaskStatus[] = ['open', 'active', 'operations', 'done'];
+const BUDGET_KINDS: BudgetKind[] = ['neutral', 'order', 'investment'];
 
 export function normalizeDatabase(raw: AnyRecord, notes: string[] = []): Database {
   const now = new Date().toISOString();
@@ -174,8 +228,6 @@ function normalizeClient(raw: AnyRecord, notes: string[]): Client {
   const ventures: Venture[] = arr(raw?.ventures).map((v) => ({
     id: str(v?.id) || newId('ven'),
     name: str(v?.name, 'Vorhaben'),
-    description: str(v?.description),
-    done: bool(v?.done),
   }));
 
   const tags: Tag[] = [];
@@ -193,24 +245,18 @@ function normalizeClient(raw: AnyRecord, notes: string[]): Client {
     name: str(p?.name, 'Person'),
     role: str(p?.role),
     defaultFte: clamp(num(p?.defaultFte, 1), 0, 10),
-    availability: arr(p?.availability).map((a) => ({
-      id: str(a?.id) || newId('prd'),
-      from: dateOrUndef(a?.from),
-      to: dateOrUndef(a?.to),
-      value: clamp(num(a?.value, 1), 0, 10),
-    })),
+    availability: arr(p?.availability).map(normalizePeriod),
+    // Tag-Ids werden weiter unten gefiltert, sobald die Tags bekannt sind.
+    tagIds: arr(p?.tagIds).map(String),
   }));
 
   const budgets: Budget[] = arr(raw?.budgets).map((b) => ({
     id: str(b?.id) || newId('bud'),
     name: str(b?.name, 'Budget'),
+    kind: BUDGET_KINDS.includes(b?.kind) ? b.kind : 'neutral',
     totalLimit: Math.max(0, num(b?.totalLimit, 0)),
-    limits: arr(b?.limits).map((l) => ({
-      id: str(l?.id) || newId('prd'),
-      from: dateOrUndef(l?.from),
-      to: dateOrUndef(l?.to),
-      value: Math.max(0, num(l?.value, 0)),
-    })),
+    limits: arr(b?.limits).map(normalizePeriod),
+    tagIds: arr(b?.tagIds).map(String),
   }));
 
   const conditions: Condition[] = arr(raw?.conditions).map((c) => ({
@@ -223,6 +269,11 @@ function normalizeClient(raw: AnyRecord, notes: string[]): Client {
   const personIds = new Set(people.map((p) => p.id));
   const budgetIds = new Set(budgets.map((b) => b.id));
   const tagIds = new Set(tags.map((t) => t.id));
+
+  // Tote Tag-Verweise entfernen. Geht erst hier, weil die Tags oben erst
+  // aufgebaut werden.
+  for (const person of people) person.tagIds = person.tagIds.filter((t) => tagIds.has(t));
+  for (const budget of budgets) budget.tagIds = budget.tagIds.filter((t) => tagIds.has(t));
   const conditionIds = new Set(conditions.map((c) => c.id));
 
   const rawTasks = arr(raw?.tasks);
@@ -232,7 +283,7 @@ function normalizeClient(raw: AnyRecord, notes: string[]): Client {
     let ventureId = str(t?.ventureId);
     if (!ventureIds.has(ventureId)) {
       if (ventures.length === 0) {
-        const fallback: Venture = { id: newId('ven'), name: 'Ohne Vorhaben', description: '', done: false };
+        const fallback: Venture = { id: newId('ven'), name: 'Ohne Vorhaben' };
         ventures.push(fallback);
         ventureIds.add(fallback.id);
         notes.push('Aufgaben ohne gültiges Vorhaben wurden dem Vorhaben "Ohne Vorhaben" zugeordnet.');
@@ -251,7 +302,6 @@ function normalizeClient(raw: AnyRecord, notes: string[]): Client {
       ventureId,
       title: str(t?.title, 'Aufgabe'),
       description: str(t?.description),
-      notes: str(t?.notes),
       checklist: arr(t?.checklist).map((c) => ({
         id: str(c?.id) || newId('chk'),
         text: str(c?.text),
@@ -259,6 +309,7 @@ function normalizeClient(raw: AnyRecord, notes: string[]): Client {
       })),
       status: STATUSES.includes(t?.status) ? t.status : 'open',
       milestone: bool(t?.milestone),
+      layout: normalizeOffset(t?.layout),
       schedule: {
         anchor,
         start: anchor === 'date' ? (dateOrUndef(t?.schedule?.start) ?? today()) : dateOrUndef(t?.schedule?.start),
@@ -278,6 +329,7 @@ function normalizeClient(raw: AnyRecord, notes: string[]): Client {
           personId: str(a.personId),
           mode: a?.mode === 'PT' ? ('PT' as const) : ('FTE' as const),
           value: Math.max(0, num(a?.value, 0)),
+          periods: arr(a?.periods).map(normalizePeriod),
         })),
       costs: arr(t?.costs)
         .filter((c) => budgetIds.has(str(c?.budgetId)))
@@ -287,6 +339,8 @@ function normalizeClient(raw: AnyRecord, notes: string[]): Client {
             budgetId: str(c.budgetId),
             label: str(c?.label, 'Kosten'),
             amount: num(c?.amount, 0),
+            actualAmount: Math.max(0, num(c?.actualAmount, 0)),
+            note: str(c?.note),
             recurring: bool(c?.recurring),
             interval: ['day', 'week', 'month', 'quarter', 'year'].includes(c?.interval) ? c.interval : 'month',
             every: Math.max(1, Math.round(num(c?.every, 1))),
@@ -300,4 +354,23 @@ function normalizeClient(raw: AnyRecord, notes: string[]): Client {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
+}
+
+/** Zeitraumwert - dieselbe Form bei Verfügbarkeit, Obergrenzen und Bedarfen. */
+function normalizePeriod(raw: AnyRecord): PeriodValue {
+  return {
+    id: str(raw?.id) || newId('prd'),
+    from: dateOrUndef(raw?.from),
+    to: dateOrUndef(raw?.to),
+    value: Math.max(0, num(raw?.value, 0)),
+  };
+}
+
+/** Netzplan-Versatz; unbrauchbare Werte gelten als "kein Versatz". */
+function normalizeOffset(raw: unknown): NodeOffset | undefined {
+  const offset = raw as AnyRecord | null;
+  if (!offset || typeof offset !== 'object') return undefined;
+  const dx = num(offset.dx, 0);
+  const dy = num(offset.dy, 0);
+  return dx === 0 && dy === 0 ? undefined : { dx, dy };
 }

@@ -8,7 +8,7 @@
  */
 import { useMemo } from 'react';
 import type { Id } from '../../model/types';
-import type { Warning } from '../../engine/validate';
+import { worstLevel, type Warning, type WarningLevel } from '../../engine/validate';
 import { useDerived } from '../../state/useDerived';
 import { useStore } from '../../state/store';
 import { Badge, EmptyState, Modal } from '../components/controls';
@@ -18,13 +18,20 @@ export interface WarningGroup {
   targetKind: Warning['targetKind'];
   label: string;
   warnings: Warning[];
+  /** Schwerste Stufe in dieser Gruppe - bestimmt die Farbe. */
+  level: WarningLevel;
 }
 
 /**
  * Fasst Aufgaben- und Ressourcenwarnungen zu Gruppen je Objekt zusammen,
  * die schwersten zuerst. Wird auch für den Zähler in der Kopfzeile genutzt.
  */
-export function useWarningGroups(): { groups: WarningGroup[]; total: number } {
+export function useWarningGroups(): {
+  groups: WarningGroup[];
+  total: number;
+  /** Schwerste Stufe im ganzen Mandanten - faerbt den Zaehler in der Kopfzeile. */
+  worst: WarningLevel | null;
+} {
   const { client } = useStore();
   const derived = useDerived();
 
@@ -45,16 +52,28 @@ export function useWarningGroups(): { groups: WarningGroup[]; total: number } {
         const targetKind = warnings[0].targetKind;
         const label = labelOf(targetKind, targetId);
         if (!label) continue;
-        groups.push({ targetId, targetKind, label, warnings });
+        groups.push({ targetId, targetKind, label, warnings, level: worstLevel(warnings) ?? 'info' });
       }
     }
 
-    const severity = (group: WarningGroup) => group.warnings.filter((w) => w.level === 'warn').length;
-    groups.sort((a, b) => severity(b) - severity(a) || b.warnings.length - a.warnings.length);
+    // Schwerste zuerst, bei Gleichstand die mit den meisten Meldungen.
+    const rank = (level: WarningLevel) => (level === 'critical' ? 2 : level === 'warn' ? 1 : 0);
+    groups.sort((a, b) => rank(b.level) - rank(a.level) || b.warnings.length - a.warnings.length);
 
-    return { groups, total: groups.reduce((sum, g) => sum + g.warnings.length, 0) };
+    return {
+      groups,
+      total: groups.reduce((sum, g) => sum + g.warnings.length, 0),
+      worst: worstLevel(groups.flatMap((g) => g.warnings)),
+    };
   }, [client.budgets, client.people, derived.resourceWarnings, derived.taskById, derived.taskWarnings]);
 }
+
+/** Überschrittene Grenzen rot, enge Lagen orange, Hinweise neutral. */
+const TONE_BY_LEVEL: Record<WarningLevel, 'critical' | 'warn' | 'default'> = {
+  critical: 'critical',
+  warn: 'warn',
+  info: 'default',
+};
 
 const KIND_LABEL: Record<Warning['targetKind'], string> = {
   task: 'Aufgabe',
@@ -97,15 +116,13 @@ export function WarningCenter({ onClose }: { onClose: () => void }) {
               title="Zum betroffenen Objekt springen"
             >
               <div className="row">
-                <Badge tone={group.warnings.some((w) => w.level === 'warn') ? 'warn' : 'default'}>
-                  {KIND_LABEL[group.targetKind]}
-                </Badge>
+                <Badge tone={TONE_BY_LEVEL[group.level]}>{KIND_LABEL[group.targetKind]}</Badge>
                 <strong className="grow truncate">{group.label}</strong>
                 <span className="faint nowrap">{group.warnings.length}</span>
               </div>
               <ul className="warnlist__reasons">
                 {group.warnings.map((warning, index) => (
-                  <li key={index} className={warning.level === 'warn' ? 'warnlist__reason--warn' : undefined}>
+                  <li key={index} className={`warnlist__reason--${warning.level}`}>
                     {warning.text}
                   </li>
                 ))}

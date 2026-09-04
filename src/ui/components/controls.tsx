@@ -179,6 +179,77 @@ export function Field({
 // Text / Zahl
 // ---------------------------------------------------------------------------
 
+/**
+ * Verzögerung, bis eine Eingabe in den Datenbestand geschrieben wird.
+ *
+ * Jeder Commit klont den gesamten Bestand und lässt Terminplan und
+ * Ressourcenlast neu rechnen. Pro Tastendruck oder Reglerschritt ist das viel
+ * zu teuer - die Oberfläche wird davon spürbar zäh. Bedienelemente halten
+ * ihren Wert deshalb selbst und melden ihn erst nach einer kurzen Pause.
+ */
+const TEXT_COMMIT_DELAY_MS = 300;
+/** Regler bewegen sich schneller als Finger tippen - kürzere Pause. */
+const SLIDER_COMMIT_DELAY_MS = 120;
+
+/**
+ * Eigener Zustand mit verzögerter Übernahme.
+ *
+ * Geändert wird lokal und ohne Verzögerung; nach `delay` Ruhe (oder sofort
+ * über `flush`, etwa beim Loslassen) geht der Wert an `onChange`. Ändert sich
+ * der Wert von aussen - Undo, Dateiwechsel, anderes Objekt gewählt -,
+ * übernimmt das Element ihn, solange gerade keine Eingabe aussteht.
+ */
+function useDeferredCommit<T>(value: T, onChange: (value: T) => void, delay: number) {
+  const [draft, setDraft] = useState(value);
+  const timer = useRef<number | null>(null);
+  const pending = useRef(false);
+  /**
+   * Der `onChange` aus dem Render, in dem zuletzt geändert wurde. Wechselt die
+   * Auswahl mitten in einer Eingabe, zeigt der Prop bereits auf das neue
+   * Objekt - die ausstehende Änderung gehört aber noch zum alten.
+   */
+  const target = useRef(onChange);
+  const lastValue = useRef(value);
+
+  const commit = (next: T, to: (v: T) => void, previous: T) => {
+    if (timer.current) window.clearTimeout(timer.current);
+    timer.current = null;
+    pending.current = false;
+    if (next !== previous) to(next);
+  };
+
+  useEffect(() => {
+    if (value === lastValue.current) return;
+    if (pending.current) commit(draft, target.current, lastValue.current);
+    lastValue.current = value;
+    setDraft(value);
+    // `draft` bewusst nicht in den Abhängigkeiten: es geht nur um den Wechsel
+    // des Werts von aussen.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
+
+  useEffect(
+    () => () => {
+      if (timer.current) window.clearTimeout(timer.current);
+    },
+    [],
+  );
+
+  return {
+    draft,
+    /** Neuer Wert vom Bedienelement - lokal sofort, nach oben verzögert. */
+    set: (next: T) => {
+      setDraft(next);
+      pending.current = true;
+      target.current = onChange;
+      if (timer.current) window.clearTimeout(timer.current);
+      timer.current = window.setTimeout(() => commit(next, onChange, value), delay);
+    },
+    /** Sofort übernehmen (Loslassen, Feld verlassen). */
+    flush: () => commit(draft, target.current, value),
+  };
+}
+
 export function TextInput({
   value,
   onChange,
@@ -193,14 +264,16 @@ export function TextInput({
   title?: string;
   className?: string;
 } & Omit<InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange' | 'className'>) {
+  const text = useDeferredCommit(value, onChange, TEXT_COMMIT_DELAY_MS);
   return (
     <input
       {...rest}
       className={`input ${className}`.trim()}
-      value={value}
+      value={text.draft}
       title={title}
       placeholder={placeholder}
-      onChange={(e: ChangeEvent<HTMLInputElement>) => onChange(e.target.value)}
+      onChange={(e: ChangeEvent<HTMLInputElement>) => text.set(e.target.value)}
+      onBlur={text.flush}
     />
   );
 }
@@ -216,13 +289,15 @@ export function TextArea({
   placeholder?: string;
   rows?: number;
 }) {
+  const text = useDeferredCommit(value, onChange, TEXT_COMMIT_DELAY_MS);
   return (
     <textarea
       className="textarea"
       rows={rows}
-      value={value}
+      value={text.draft}
       placeholder={placeholder}
-      onChange={(e) => onChange(e.target.value)}
+      onChange={(e) => text.set(e.target.value)}
+      onBlur={text.flush}
     />
   );
 }
@@ -252,6 +327,17 @@ export function DateInput({
  * Konzept überall so eingegeben - der Slider für schnelles Schätzen, das
  * Feld für exakte Werte.
  */
+/**
+ * Zahl-Eingabe als Regler mit direkter Zahleingabe daneben. Zahlen werden laut
+ * Konzept überall so eingegeben - der Regler für schnelles Schätzen, das Feld
+ * für exakte Werte.
+ *
+ * **Der Regler schreibt erst beim Loslassen in den Datenbestand.** Während des
+ * Ziehens liefe sonst pro Pixel ein Commit: tiefe Kopie des gesamten Bestands,
+ * Terminplan und Ressourcenlast neu gerechnet. Der Griff folgt trotzdem sofort,
+ * weil er seinen Wert lokal hält. Eine kurze Verzögerung greift zusätzlich als
+ * Netz, falls das Loslassen nie ankommt (abgebrochene Berührung, Pfeiltasten).
+ */
 export function NumberSlider({
   value,
   onChange,
@@ -271,17 +357,20 @@ export function NumberSlider({
   suffix?: string;
   title?: string;
   /**
-   * Kurzform für Werkzeugleisten: nur Schieber und eine kleine Zahl daneben,
+   * Kurzform für Werkzeugleisten: nur Regler und eine kleine Zahl daneben,
    * ohne Eingabefeld. Für Einstellungen, die man schiebt statt tippt.
    */
   compact?: boolean;
   /** Nur in der Kurzform: eigene Beschriftung des Werts (z.B. "alle"). */
   format?: (value: number) => string;
 }) {
+  const slider = useDeferredCommit(value, onChange, SLIDER_COMMIT_DELAY_MS);
+
   const clamp = (v: number) => Math.min(max, Math.max(min, v));
-  const fill = ((clamp(value) - min) / Math.max(1e-9, max - min)) * 100;
+  const shown = Number.isFinite(slider.draft) ? clamp(slider.draft) : min;
+  const fill = ((shown - min) / Math.max(1e-9, max - min)) * 100;
   const decimals = step < 1 ? String(step).split('.')[1]?.length ?? 2 : 0;
-  const shown = Number.isFinite(value) ? Number(value.toFixed(decimals)) : 0;
+  const rounded = Number(shown.toFixed(decimals));
 
   return (
     <div className={`slider${compact ? ' slider--compact' : ''}`} title={title}>
@@ -290,13 +379,17 @@ export function NumberSlider({
         min={min}
         max={max}
         step={step}
-        value={clamp(value)}
+        value={shown}
         style={{ ['--fill' as string]: `${fill}%` }}
-        onChange={(e) => onChange(Number(e.target.value))}
+        onChange={(e) => slider.set(Number(e.target.value))}
+        // Loslassen schreibt sofort - Maus, Finger und Tastatur.
+        onPointerUp={slider.flush}
+        onKeyUp={slider.flush}
+        onBlur={slider.flush}
       />
       {compact ? (
         <span className="slider__readout mono">
-          {format ? format(shown) : suffix ? `${shown} ${suffix}` : shown}
+          {format ? format(rounded) : suffix ? `${rounded} ${suffix}` : rounded}
         </span>
       ) : (
         <>
@@ -306,8 +399,9 @@ export function NumberSlider({
               type="number"
               min={min}
               step={step}
-              value={shown}
-              onChange={(e) => onChange(e.target.value === '' ? min : Number(e.target.value))}
+              value={rounded}
+              onChange={(e) => slider.set(e.target.value === '' ? min : Number(e.target.value))}
+              onBlur={slider.flush}
             />
           </div>
           {suffix && <span className="faint nowrap">{suffix}</span>}
@@ -352,6 +446,12 @@ export interface ComboOption {
   color?: string;
   disabled?: boolean;
   disabledReason?: string;
+  /**
+   * Einträge mit `group` werden vor allen anderen gezeigt und durch eine
+   * Überschrift abgesetzt. Genutzt, um die Aufgaben des aktuellen Vorhabens
+   * nach oben zu holen - danach sucht man in aller Regel.
+   */
+  group?: string;
 }
 
 export function Combobox({
@@ -384,8 +484,13 @@ export function Combobox({
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return options.slice(0, 50);
-    return options.filter((o) => o.label.toLowerCase().includes(q) || o.hint?.toLowerCase().includes(q)).slice(0, 50);
+    const matching = q
+      ? options.filter((o) => o.label.toLowerCase().includes(q) || o.hint?.toLowerCase().includes(q))
+      : options;
+    // Gruppierte Eintraege zuerst, sonst die urspruengliche Reihenfolge.
+    const grouped = matching.filter((o) => o.group);
+    const rest = matching.filter((o) => !o.group);
+    return [...grouped, ...rest].slice(0, 50);
   }, [options, query]);
 
   const canCreate =
@@ -458,6 +563,7 @@ export function Combobox({
           {filtered.map((option, index) => (
             <button
               key={option.id}
+              data-group={option.group ?? undefined}
               type="button"
               role="option"
               aria-selected={index === active}

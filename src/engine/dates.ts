@@ -125,6 +125,28 @@ export function clampDate(iso: IsoDate, from: IsoDate, to: IsoDate): IsoDate {
 
 export type Granularity = 'day' | 'week' | 'month' | 'quarter' | 'year';
 
+/**
+ * Zeitraster, die in der Oberflaeche angeboten werden.
+ *
+ * `day` bleibt im Typ - die Buckets werden intern weiterhin tageweise gebildet
+ * und Bestandsdateien koennen den Wert enthalten. Als Auswahl taugt es nicht:
+ * ueber einen Projektzeitraum von Monaten oder Jahren entstehen hunderte
+ * Saeulen, die nichts mehr zeigen.
+ */
+export const SELECTABLE_GRANULARITIES: Granularity[] = ['week', 'month', 'quarter', 'year'];
+
+/**
+ * Passendes Zeitraster fuer eine Zeitspanne: so gewaehlt, dass das Ganze in
+ * eine ueberschaubare Zahl von Saeulen faellt und die volle Breite ausfuellt.
+ */
+export function fittingGranularity(from: IsoDate, to: IsoDate): Granularity {
+  const days = Math.max(1, diffDays(from, to));
+  if (days <= 120) return 'week';
+  if (days <= 800) return 'month';
+  if (days <= 2600) return 'quarter';
+  return 'year';
+}
+
 export const GRANULARITY_LABEL: Record<Granularity, string> = {
   day: 'Tag',
   week: 'Woche',

@@ -1,8 +1,8 @@
 /**
  * Netzplan als SVG - zoom- und verschiebbar.
  *
- * Knoten = Aufgaben (Farbstreifen zeigt Tag bzw. Status), Kanten =
- * Abhängigkeiten, gepunktet = Parallelität. Ein Klick wählt die Aufgabe aus -
+ * Knoten = Aufgaben (Farbstreifen zeigt den Status), Kanten = Abhängigkeiten;
+ * Parallelität verlässt die Knoten oben/unten. Ein Klick wählt die Aufgabe aus -
  * oder übernimmt sie in das gerade aktive Abhängigkeitsfeld (pickTarget).
  *
  * Bedienung der Fläche: Mausrad zoomt auf den Cursor, Ziehen verschiebt,
@@ -14,11 +14,26 @@
  *    Kante ein grünes "+", das direkt einen Vorgänger bzw. Nachfolger anlegt.
  *  - Beim Überfahren einer Kante oder einer Ressource unten leuchten alle
  *    beteiligten Aufgaben auf, der Rest blasst ab.
+ *
+ * Knoten lassen sich ziehen. Gespeichert wird nur der **Versatz** gegenüber der
+ * berechneten Position (`task.layout`), damit das automatische Layout aktiv
+ * bleibt: ändern sich Abhängigkeiten, wandert der Knoten mit und behält seine
+ * Verschiebung. "Ansicht zurücksetzen" verwirft alle Versätze.
+ *
+ * Strg+C / Strg+V dupliziert die gewählte Aufgabe.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Client, Id, Task } from '../../model/types';
 import { TASK_STATUS_LABEL } from '../../model/types';
-import { edgePath, layoutNetwork, type LayoutNode } from '../../engine/layout';
+import {
+  edgePath,
+  hasManualLayout,
+  layoutNetwork,
+  NODE_HEIGHT,
+  NODE_WIDTH,
+  parallelPath,
+  type LayoutNode,
+} from '../../engine/layout';
 import { formatDateDe } from '../../engine/dates';
 import { wouldCreateCycle, type ScheduleResult } from '../../engine/schedule';
 import type { Warning } from '../../engine/validate';
@@ -27,8 +42,9 @@ import { usePreferences } from '../../state/preferences';
 import { useStore } from '../../state/store';
 import { RAIL_HEIGHT, ResourceRailLayer, type RailAnchor } from './ResourceRailLayer';
 import { useZoomPan } from '../components/useZoomPan';
-import { Button } from '../components/controls';
+import { Button, ConfirmButton } from '../components/controls';
 import { ExportPngButton } from '../components/ExportPngButton';
+import { TagBadges } from './TagBadges';
 
 export function NetworkChart({
   client,
@@ -155,6 +171,13 @@ export function NetworkChart({
     }
   };
 
+  /** Wie viel der geplanten Kosten einer Aufgabe ist bereits abgerufen? */
+  const costProgressOf = (task: Task): number | null => {
+    const planned = task.costs.reduce((sum, c) => sum + c.amount, 0);
+    if (planned <= 0) return null;
+    return task.costs.reduce((sum, c) => sum + c.actualAmount, 0) / planned;
+  };
+
   const maxWeight = useMemo(
     () => Math.max(1, ...tasks.map(weightOf)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -165,6 +188,18 @@ export function NetworkChart({
     const node = ui.selectedTaskId ? nodeById.get(ui.selectedTaskId) : undefined;
     if (node) zoom.focusOn(node);
   };
+
+  // Zoomstufe als Ref: der Bewegungs-Handler soll nicht bei jeder Aenderung
+  // neu gebaut werden.
+  const scaleRef = useRef(zoom.scale);
+  scaleRef.current = zoom.scale;
+  const drag = useNodeDrag({ scaleRef, commitClient, onDragged: zoom.markAdjusted });
+
+  /** Verwirft alle Handverschiebungen und stellt das Auto-Layout wieder her. */
+  const resetLayout = () =>
+    commitClient('Ansicht zurückgesetzt', (c) => {
+      for (const t of c.tasks) delete t.layout;
+    });
 
   if (tasks.length === 0) {
     return (
@@ -227,11 +262,30 @@ export function NetworkChart({
         >
           Auf Auswahl
         </Button>
+        {/* Nur sichtbar, wenn es überhaupt etwas zurückzusetzen gibt. */}
+        {hasManualLayout(client.tasks) && (
+          <ConfirmButton
+            size="sm"
+            variant="default"
+            onConfirm={resetLayout}
+            confirmLabel="Wirklich zurücksetzen?"
+            title="Alle von Hand verschobenen Aufgaben auf die automatisch berechnete Anordnung zurücksetzen"
+          >
+            Ansicht zurücksetzen
+          </ConfirmButton>
+        )}
         <ExportPngButton svgRef={svgRef} namePrefix="mpt-netzplan" />
       </div>
 
       <svg ref={svgRef} width="100%" height="100%" role="img" aria-label="Netzplan der Aufgaben">
         <defs>
+          {/*
+            Ein einziger Clip-Pfad genuegt: alle Knoten haben dieselbe Groesse
+            (NODE_WIDTH x NODE_HEIGHT).
+          */}
+          <clipPath id={NODE_CLIP_ID}>
+            <rect width={NODE_WIDTH} height={NODE_HEIGHT} rx={8} ry={8} />
+          </clipPath>
           <marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
             <path d="M 0 0 L 8 4 L 0 8 z" fill="var(--border-strong)" />
           </marker>
@@ -259,7 +313,7 @@ export function NetworkChart({
             return (
               <path
                 key={`${edge.from}-${edge.to}-${index}`}
-                d={edgePath(from, to)}
+                d={edge.kind === 'parallel' ? parallelPath(from, to) : edgePath(from, to)}
                 className={[
                   'edge',
                   edge.kind === 'parallel' ? 'edge--parallel' : '',
@@ -282,28 +336,11 @@ export function NetworkChart({
             );
           })}
 
-          {/* Knoten */}
-          {layout.nodes.map((node) => (
-            <NodeView
-              key={node.id}
-              node={node}
-              schedule={schedule}
-              selected={ui.selectedTaskId === node.id}
-              dim={Boolean(pick && pick.taskId === node.id) || Boolean(highlighted && !highlighted.has(node.id))}
-              lit={Boolean(highlighted?.has(node.id))}
-              showCritical={prefs.showCriticalPath}
-              warnings={warnings.get(node.id) ?? []}
-              tagColor={node.task.tagIds.map((id) => tagById.get(id)?.color).find(Boolean)}
-              weightRatio={prefs.weighting === 'none' ? 0 : weightOf(node.task) / maxWeight}
-              /* Die "+"-Knöpfe stören im Auswahlmodus nur. */
-              showAdders={hoveredTask === node.id && !pick}
-              onHover={(hovering) => setHoveredTask(hovering ? node.id : null)}
-              onClick={() => onNodeClick(node.task)}
-              onZoomTo={() => zoom.focusOn(node)}
-              onAdd={(side) => addChained(node.task, side)}
-            />
-          ))}
-
+          {/*
+            Ressourcenleiste VOR den Knoten: ihre Verbindungslinien laufen von
+            den oberen Reihen nach unten und wuerden sonst quer ueber die
+            Knoten der unteren Reihen gezeichnet.
+          */}
           {showRail && (
             <ResourceRailLayer
               client={client}
@@ -316,6 +353,31 @@ export function NetworkChart({
               onHighlight={setHighlighted}
             />
           )}
+
+          {/* Knoten */}
+          {layout.nodes.map((node) => (
+            <NodeView
+              key={node.id}
+              node={node}
+              schedule={schedule}
+              selected={ui.selectedTaskId === node.id}
+              dim={Boolean(pick && pick.taskId === node.id) || Boolean(highlighted && !highlighted.has(node.id))}
+              lit={Boolean(highlighted?.has(node.id))}
+              showCritical={prefs.showCriticalPath}
+              warnings={warnings.get(node.id) ?? []}
+              tags={node.task.tagIds.map((id) => tagById.get(id)).filter((t): t is NonNullable<typeof t> => Boolean(t))}
+              weightRatio={prefs.weighting === 'none' ? 0 : weightOf(node.task) / maxWeight}
+              costProgress={prefs.weighting === 'cost' ? costProgressOf(node.task) : null}
+              /* Die "+"-Knöpfe stören im Auswahlmodus nur. */
+              showAdders={hoveredTask === node.id && !pick}
+              onHover={(hovering) => setHoveredTask(hovering ? node.id : null)}
+              onClick={() => onNodeClick(node.task)}
+              onZoomTo={() => zoom.focusOn(node)}
+              onAdd={(side) => addChained(node.task, side)}
+              onDragStart={(event) => drag.start(event, node.task, node)}
+            />
+          ))}
+
         </g>
       </svg>
     </div>
@@ -325,6 +387,9 @@ export function NetworkChart({
 /** Radius der Anlege-Knöpfe an den Knotenkanten. */
 const ADDER_RADIUS = 9;
 
+/** Gemeinsamer Clip-Pfad aller Knoten - siehe defs im SVG. */
+const NODE_CLIP_ID = 'mpt-node-clip';
+
 function NodeView({
   node,
   schedule,
@@ -333,13 +398,15 @@ function NodeView({
   lit,
   showCritical,
   warnings,
-  tagColor,
+  tags,
   weightRatio,
+  costProgress,
   showAdders,
   onHover,
   onClick,
   onZoomTo,
   onAdd,
+  onDragStart,
 }: {
   node: LayoutNode;
   schedule: ScheduleResult;
@@ -348,13 +415,20 @@ function NodeView({
   lit: boolean;
   showCritical: boolean;
   warnings: Warning[];
-  tagColor?: string;
+  /** Tags der Aufgabe - als kleine Marken am unteren Rand. */
+  tags: { id: Id; name: string; color: string }[];
   weightRatio: number;
+  /**
+   * Anteil der bereits abgerufenen Kosten (0..1) - nur bei Gewichtung nach
+   * Kosten belegt, sonst `null`.
+   */
+  costProgress: number | null;
   showAdders: boolean;
   onHover: (hovering: boolean) => void;
   onClick: () => void;
   onZoomTo: () => void;
   onAdd: (side: 'before' | 'after') => void;
+  onDragStart: (event: React.PointerEvent) => void;
 }) {
   const st = schedule.byId.get(node.id);
   const task = node.task;
@@ -366,6 +440,7 @@ function NodeView({
     `Status: ${TASK_STATUS_LABEL[task.status]}`,
     st ? `${formatDateDe(st.start)} - ${st.openEnded ? 'offen' : formatDateDe(st.end)}` : '',
     st && !st.openEnded ? `Dauer: ${st.duration} AT · Puffer: ${st.slack} AT${st.critical ? ' (kritischer Pfad)' : ''}` : '',
+    costProgress !== null ? `Kosten abgerufen: ${Math.round(costProgress * 100)} %` : '',
     ...warnings.map((w) => `! ${w.text}`),
     'Doppelklick zoomt heran',
   ]
@@ -387,6 +462,7 @@ function NodeView({
         .join(' ')}
       transform={`translate(${node.x},${node.y})`}
       onClick={onClick}
+      onPointerDown={onDragStart}
       onMouseEnter={() => onHover(true)}
       onMouseLeave={() => onHover(false)}
       onDoubleClick={(e) => {
@@ -404,21 +480,47 @@ function NodeView({
       }}
     >
       <title>{tooltip}</title>
-      <rect className="node__box" width={node.width} height={node.height} />
-      {/* Statusstreifen links */}
-      <rect className="node__accent" x={0} y={0} width={4} height={node.height} fill={tagColor ?? statusColor} rx={2} />
-      {/* Gewichtungsbalken unten */}
-      {weightRatio > 0 && (
-        <rect
-          x={8}
-          y={node.height - 7}
-          width={(node.width - 16) * Math.min(1, weightRatio)}
-          height={3}
-          rx={1.5}
-          fill="var(--accent)"
-          opacity={0.55}
-        />
-      )}
+      {/*
+        Reihenfolge ist hier entscheidend: erst die gefuellte Flaeche, dann
+        alles Innere geclippt, ganz zuletzt die Umrandung. Der Statusstreifen
+        stiess sonst ueber die abgerundete Ecke hinaus und die Umrandung kreuzte
+        ihn - genau die unsaubere linke Kante.
+      */}
+      <rect className="node__fill" width={node.width} height={node.height} rx={8} ry={8} />
+
+      <g clipPath={`url(#${NODE_CLIP_ID})`}>
+        {/* Statusstreifen links */}
+        <rect className="node__accent" x={0} y={0} width={4} height={node.height} fill={statusColor} />
+
+        {/*
+          Gewichtungsbalken ganz unten am Rand. Bei der Gewichtung nach Kosten
+          zeigt der gefuellte Teil zusaetzlich, wie viel davon bereits
+          abgerufen ist - dieselbe Aussage wie im Kosten-Editor, nur als Bild.
+        */}
+        {weightRatio > 0 && (
+          <>
+            <rect
+              x={8}
+              y={node.height - 4}
+              width={(node.width - 16) * Math.min(1, weightRatio)}
+              height={3}
+              rx={1.5}
+              fill="var(--accent)"
+              opacity={costProgress === null ? 0.55 : 0.25}
+            />
+            {costProgress !== null && costProgress > 0 && (
+              <rect
+                x={8}
+                y={node.height - 4}
+                width={(node.width - 16) * Math.min(1, weightRatio) * Math.min(1, costProgress)}
+                height={3}
+                rx={1.5}
+                fill="var(--ok)"
+              />
+            )}
+          </>
+        )}
+      </g>
       {/* Meilensteine tragen die übliche Raute statt des Statuspunkts. */}
       {task.milestone ? (
         <rect x={11} y={11} width={10} height={10} rx={1.5} fill={statusColor} transform="rotate(45 16 16)" />
@@ -426,26 +528,37 @@ function NodeView({
         <circle cx={16} cy={16} r={4} fill={statusColor} />
       )}
       <text className="node__title" x={26} y={20}>
-        {truncate(task.title, 21)}
+        {truncate(task.title, 25)}
       </text>
       <text className="node__meta" x={12} y={38}>
         {st ? `${formatDateDe(st.start)} → ${st.openEnded ? 'offen' : formatDateDe(st.end)}` : '-'}
       </text>
-      <text className="node__meta" x={12} y={52}>
+      <text className="node__meta" x={12} y={47}>
         {st && !st.openEnded ? `${st.duration} AT` : 'Dauerläufer'}
         {st && !st.openEnded && st.slack > 0 ? ` · Puffer ${st.slack}` : ''}
         {critical ? ' · kritisch' : ''}
       </text>
+      {/*
+        Tags als kleine Textmarken mit farbigem Hintergrund - dieselbe Idee wie
+        `.badge` in der Oberflaeche: geteilte Farbe fuer Flaeche und Schrift,
+        die Flaeche stark abgeschwaecht. So bleibt der Name lesbar, egal wie
+        hell oder dunkel die Tag-Farbe ist.
+      */}
+      <TagBadges tags={tags} y={node.height - 17} available={node.width - 24} />
+
       {warnings.length > 0 && (
         <text x={node.width - 16} y={20} fill="var(--warn)" fontSize={13}>
           &#9888;
         </text>
       )}
       {st?.openEnded && (
-        <text x={node.width - 16} y={52} fill="var(--info)" fontSize={11} textAnchor="end">
+        <text x={node.width - 16} y={47} fill="var(--info)" fontSize={11} textAnchor="end">
           ∞
         </text>
       )}
+
+      {/* Umrandung zuletzt, damit sie ueber allem liegt und die Kante sauber ist. */}
+      <rect className="node__box" width={node.width} height={node.height} rx={8} ry={8} />
 
       {/*
         Anlege-Knöpfe. Sie sitzen genau auf der Kante des Knotens, damit beim
@@ -511,6 +624,88 @@ function AdderButton({
       />
     </g>
   );
+}
+
+/**
+ * Ziehen eines Knotens.
+ *
+ * Gespeichert wird ein **Versatz** gegenüber der berechneten Position, nicht
+ * die Position selbst - so bleibt das Auto-Layout wirksam.
+ *
+ * Wichtig für die Flüssigkeit: während des Ziehens wird **kein** React-Zustand
+ * angefasst. Ein `setState` je Mausbewegung würde den gesamten Plan neu
+ * rendern - alle Knoten, alle Kanten, die ganze Ressourcenleiste -, und genau
+ * das machte das Ziehen zäh. Stattdessen wird das `transform` des gezogenen
+ * Knotens direkt am DOM-Element gesetzt, gedrosselt auf einen Bildaufbau.
+ * Erst beim Loslassen entsteht ein Commit.
+ *
+ * Die Zoomstufe muss herausgerechnet werden: eine Mausbewegung von 100 px
+ * entspricht bei halber Vergrößerung 200 Zeichen-Einheiten.
+ */
+function useNodeDrag({
+  scaleRef,
+  commitClient,
+  onDragged,
+}: {
+  /** Als Ref, damit der Bewegungs-Handler nicht bei jedem Zoom neu entsteht. */
+  scaleRef: React.MutableRefObject<number>;
+  commitClient: ReturnType<typeof useStore>['commitClient'];
+  /** Verhindert, dass sich die Ansicht nach dem Verschieben neu einpasst. */
+  onDragged: () => void;
+}) {
+  const start = (event: React.PointerEvent, task: Task, node: LayoutNode) => {
+    if (event.button !== 0) return;
+    // Nicht ziehen, wenn ein "+"-Knopf oder ein anderes Bedienelement getroffen wurde.
+    if ((event.target as Element).closest('.adder')) return;
+    event.stopPropagation();
+
+    const element = (event.currentTarget as SVGGElement) ?? null;
+    const base = task.layout ?? { dx: 0, dy: 0 };
+    const originX = event.clientX;
+    const originY = event.clientY;
+    let dx = 0;
+    let dy = 0;
+    let moved = false;
+    let frame = 0;
+
+    const paint = () => {
+      frame = 0;
+      element?.setAttribute('transform', `translate(${node.x + dx},${node.y + dy})`);
+    };
+
+    const move = (e: PointerEvent) => {
+      const scale = Math.max(0.01, scaleRef.current);
+      dx = (e.clientX - originX) / scale;
+      dy = (e.clientY - originY) / scale;
+      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) moved = true;
+      // Höchstens ein Neuzeichnen je Bildaufbau.
+      if (!frame) frame = requestAnimationFrame(paint);
+    };
+
+    const end = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', end);
+      if (frame) cancelAnimationFrame(frame);
+      if (!moved) return;
+
+      onDragged();
+      const nextDx = Math.round(base.dx + dx);
+      const nextDy = Math.round(base.dy + dy);
+      commitClient('Aufgabe im Netzplan verschoben', (c) => {
+        const target = c.tasks.find((t) => t.id === task.id);
+        if (!target) return;
+        // Versatz null bedeutet "wieder automatisch" - dann das Feld ganz
+        // entfernen, damit die Datei sauber bleibt.
+        if (nextDx === 0 && nextDy === 0) delete target.layout;
+        else target.layout = { dx: nextDx, dy: nextDy };
+      });
+    };
+
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', end);
+  };
+
+  return { start };
 }
 
 function truncate(text: string, max: number): string {

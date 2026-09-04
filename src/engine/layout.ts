@@ -6,8 +6,10 @@
  *     (Baryzentrum), mehrfach iteriert, um Kantenkreuzungen zu reduzieren,
  *  3. feste Rasterabstände -> stabile, ruhige Darstellung.
  *
- * Knotenpositionen werden bewusst nicht gespeichert; das Layout ergibt sich
- * jedes Mal neu aus dem Graphen.
+ * Die berechnete Position ist die Wahrheit; eine Handverschiebung wird als
+ * **relativer Versatz** (`task.layout`) darauf addiert. Dadurch ordnet sich der
+ * Plan bei Strukturänderungen weiterhin selbst, behält aber die persönliche
+ * Anordnung.
  */
 import type { Id, Task } from '../model/types';
 
@@ -35,11 +37,17 @@ export interface NetworkLayout {
   height: number;
 }
 
-export const NODE_WIDTH = 190;
+/** Etwas breiter als noetig waere - so bleibt mehr vom Titel lesbar. */
+export const NODE_WIDTH = 216;
 export const NODE_HEIGHT = 68;
 const COLUMN_GAP = 78;
 const ROW_GAP = 26;
 const PADDING = 24;
+
+/** Hat mindestens eine Aufgabe eine Handverschiebung? */
+export function hasManualLayout(tasks: Task[]): boolean {
+  return tasks.some((t) => t.layout && (t.layout.dx !== 0 || t.layout.dy !== 0));
+}
 
 export function layoutNetwork(tasks: Task[], depthOf: (id: Id) => number): NetworkLayout {
   const byId = new Map(tasks.map((t) => [t.id, t]));
@@ -83,13 +91,16 @@ export function layoutNetwork(tasks: Task[], depthOf: (id: Id) => number): Netwo
     const ids = columns.get(col)!;
     maxRows = Math.max(maxRows, ids.length);
     ids.forEach((id, row) => {
+      const task = byId.get(id)!;
+      // Berechnete Position plus Handverschiebung - siehe Modulkommentar.
+      const offset = task.layout ?? { dx: 0, dy: 0 };
       nodes.push({
         id,
-        task: byId.get(id)!,
+        task,
         column: col,
         row,
-        x: PADDING + col * (NODE_WIDTH + COLUMN_GAP),
-        y: PADDING + row * (NODE_HEIGHT + ROW_GAP),
+        x: PADDING + col * (NODE_WIDTH + COLUMN_GAP) + offset.dx,
+        y: PADDING + row * (NODE_HEIGHT + ROW_GAP) + offset.dy,
         width: NODE_WIDTH,
         height: NODE_HEIGHT,
       });
@@ -108,11 +119,18 @@ export function layoutNetwork(tasks: Task[], depthOf: (id: Id) => number): Netwo
   }
 
   const lastCol = sortedColumns.length > 0 ? sortedColumns[sortedColumns.length - 1] : 0;
+  // Verschobene Knoten koennen ueber das Raster hinausragen; die Flaeche muss
+  // sie einschliessen, sonst schneidet "Einpassen" sie ab.
+  const rightMost = nodes.reduce((m, n) => Math.max(m, n.x + n.width), 0);
+  const bottomMost = nodes.reduce((m, n) => Math.max(m, n.y + n.height), 0);
   return {
     nodes,
     edges,
-    width: PADDING * 2 + (lastCol + 1) * NODE_WIDTH + lastCol * COLUMN_GAP,
-    height: PADDING * 2 + Math.max(1, maxRows) * NODE_HEIGHT + Math.max(0, maxRows - 1) * ROW_GAP,
+    width: Math.max(PADDING * 2 + (lastCol + 1) * NODE_WIDTH + lastCol * COLUMN_GAP, rightMost + PADDING),
+    height: Math.max(
+      PADDING * 2 + Math.max(1, maxRows) * NODE_HEIGHT + Math.max(0, maxRows - 1) * ROW_GAP,
+      bottomMost + PADDING,
+    ),
   };
 }
 
@@ -128,6 +146,26 @@ export function edgePath(from: LayoutNode, to: LayoutNode): string {
   const y2 = to.y + to.height / 2;
   const dx = Math.max(30, (x2 - x1) / 2);
   return `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`;
+}
+
+/**
+ * Parallelitaet verlaesst die Knoten oben bzw. unten statt seitlich.
+ *
+ * Das ist keine Kosmetik: Abhaengigkeiten laufen waagerecht und bedeuten "erst
+ * A, dann B". Eine Parallelitaet bedeutet "gleichzeitig" und darf deshalb nicht
+ * wie eine zeitliche Reihenfolge aussehen - senkrechte Anschluesse trennen die
+ * beiden Aussagen auf den ersten Blick.
+ */
+export function parallelPath(from: LayoutNode, to: LayoutNode): string {
+  // Immer vom unteren Knoten nach oben zum oberen - so ist die Kurve stabil,
+  // egal in welcher Reihenfolge die Aufgaben verknuepft wurden.
+  const [upper, lower] = from.y <= to.y ? [from, to] : [to, from];
+  const x1 = upper.x + upper.width / 2;
+  const y1 = upper.y + upper.height;
+  const x2 = lower.x + lower.width / 2;
+  const y2 = lower.y;
+  const dy = Math.max(20, (y2 - y1) / 2);
+  return `M ${x1} ${y1} C ${x1} ${y1 + dy}, ${x2} ${y2 - dy}, ${x2} ${y2}`;
 }
 
 /** Verbindung zwischen Aufgabenknoten (oben) und Ressourcenblock (unten). */

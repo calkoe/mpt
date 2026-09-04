@@ -9,9 +9,11 @@ import { useState } from 'react';
 import { createClient, createVenture } from '../model/factory';
 import type { Venture } from '../model/types';
 import { useDerived } from '../state/useDerived';
+import { isVentureDone } from '../engine/validate';
 import { useStore, type ViewMode } from '../state/store';
-import { Button, Combobox, ConfirmButton, Field, Segmented, Switch, TextInput, WarnIcon } from './components/controls';
+import { Button, Combobox, ConfirmButton, Field, Segmented, TextInput, WarnIcon } from './components/controls';
 import { TagDialog } from './dialogs/TagDialog';
+import { moveItem, useReorder } from './components/useReorder';
 
 export function Sidebar() {
   const { db, client, ui, setUi, commit, commitClient } = useStore();
@@ -19,11 +21,15 @@ export function Sidebar() {
   const [clientMenuOpen, setClientMenuOpen] = useState(false);
   const [tagsOpen, setTagsOpen] = useState(false);
 
+  // Anzeigereihenfolge der Vorhaben = Array-Reihenfolge, per Ziehen aenderbar.
+  const ventureOrder = useReorder((from, to) =>
+    commitClient('Vorhaben umsortiert', (c) => moveItem(c.ventures, from, to)),
+  );
+
   const ventureStats = (venture: Venture) => {
     const tasks = client.tasks.filter((t) => t.ventureId === venture.id);
-    const done = tasks.filter((t) => t.status === 'done').length;
     const warnings = tasks.reduce((sum, t) => sum + (taskWarnings.get(t.id)?.length ?? 0), 0);
-    return { total: tasks.length, done, warnings, progress: tasks.length === 0 ? 0 : done / tasks.length };
+    return { total: tasks.length, warnings, done: isVentureDone(client, venture.id) };
   };
 
   const addVenture = () => {
@@ -131,32 +137,35 @@ export function Sidebar() {
           </div>
         </button>
 
-        {client.ventures.map((venture) => {
+        {client.ventures.map((venture, index) => {
           const stats = ventureStats(venture);
           const active = ui.ventureId === venture.id;
           return (
             <div key={venture.id}>
-              <button
-                type="button"
-                className={`venture${active ? ' venture--active' : ''}`}
+              <div
+                role="button"
+                tabIndex={0}
+                className={`venture sortable${active ? ' venture--active' : ''}`}
+                {...ventureOrder.itemProps(index)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    setUi({ ventureId: active ? null : venture.id, selectedTaskId: null });
+                  }
+                }}
                 onClick={() => setUi({ ventureId: active ? null : venture.id, selectedTaskId: null })}
-                title={venture.description || venture.name}
+                title={venture.name}
               >
                 <div className="venture__title">
-                  <span className={`status-dot status-dot--${venture.done ? 'done' : 'open'}`} />
+                  <span className={`status-dot status-dot--${stats.done ? 'done' : 'open'}`} />
                   <span className="grow truncate">{venture.name}</span>
                   {stats.warnings > 0 && <WarnIcon warnings={[`${stats.warnings} Hinweise in diesem Vorhaben`]} />}
                 </div>
                 <div className="venture__meta">
-                  <span>
-                    {stats.done}/{stats.total} erledigt
-                  </span>
-                  {venture.done && <span className="badge badge--ok">abgeschlossen</span>}
+                  <span>{stats.total} Aufgaben</span>
+                  {stats.done && <span className="badge badge--ok">abgeschlossen</span>}
                 </div>
-                <div className="venture__bar">
-                  <i style={{ width: `${Math.round(stats.progress * 100)}%` }} />
-                </div>
-              </button>
+              </div>
 
               {active && (
                 <div className="col" style={{ padding: 'var(--sp-2) var(--sp-2) var(--sp-3)' }}>
@@ -170,27 +179,12 @@ export function Sidebar() {
                       }, { coalesceKey: `venture-name-${venture.id}` })
                     }
                   />
-                  <TextInput
-                    value={venture.description}
-                    placeholder="Kurzbeschreibung"
-                    onChange={(description) =>
-                      commitClient('Vorhaben bearbeitet', (c) => {
-                        const v = c.ventures.find((x) => x.id === venture.id);
-                        if (v) v.description = description;
-                      }, { coalesceKey: `venture-desc-${venture.id}` })
-                    }
-                  />
                   <div className="row row--between">
-                    <Switch
-                      checked={venture.done}
-                      label="Abgeschlossen"
-                      onChange={(done) =>
-                        commitClient(done ? 'Vorhaben abgeschlossen' : 'Vorhaben wieder geöffnet', (c) => {
-                          const v = c.ventures.find((x) => x.id === venture.id);
-                          if (v) v.done = done;
-                        })
-                      }
-                    />
+                    <span className="faint" style={{ fontSize: 'var(--fs-sm)' }}>
+                      {stats.done
+                        ? 'Abgeschlossen - alle Aufgaben erledigt oder im Betrieb.'
+                        : `${stats.total} Aufgabe(n)`}
+                    </span>
                     <ConfirmButton
                       size="sm"
                       title="Vorhaben und dessen Aufgaben löschen"

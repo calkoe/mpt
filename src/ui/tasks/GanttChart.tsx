@@ -27,6 +27,9 @@ import type { Warning } from '../../engine/validate';
 import { usePreferences } from '../../state/preferences';
 import { useStore } from '../../state/store';
 import { ExportPngButton } from '../components/ExportPngButton';
+import { ChartZoomControls } from '../components/ChartZoomControls';
+import { useChartZoom } from '../components/useChartZoom';
+import { useElementSize } from '../components/useElementSize';
 import { RAIL_HEIGHT, ResourceRailLayer } from './ResourceRailLayer';
 
 const ROW_HEIGHT = 26;
@@ -69,8 +72,12 @@ export function GanttChart({
     [tasks, schedule],
   );
 
+  /*
+   * Gezeichnet wird der volle Zeitraum - Dauerlaeufer laufen zehn Jahre weiter,
+   * und wer dorthin scrollt, soll sie auch sehen.
+   */
   const { from, to } = useMemo(() => {
-    if (rows.length === 0) return { from: schedule.horizonStart, to: schedule.horizonEnd };
+    if (rows.length === 0) return { from: schedule.displayStart, to: schedule.horizonEnd };
     let min = rows[0].st.start;
     let max = rows[0].st.end;
     for (const r of rows) {
@@ -78,14 +85,43 @@ export function GanttChart({
       if (diffDays(max, r.st.lateEnd) > 0) max = r.st.lateEnd;
       if (diffDays(max, r.st.endPessimistic) > 0) max = r.st.endPessimistic;
     }
+    // Immer etwas Vorlauf vor heute - siehe `displayStart`.
+    if (diffDays(schedule.displayStart, min) > 0) min = schedule.displayStart;
     return { from: min, to: max };
   }, [rows, schedule]);
 
+  /*
+   * Fuer die Zoomstufe zaehlt dagegen nur der Teil bis zum Ende der letzten
+   * endlichen Aufgabe (plus etwas Luft fuers Unendlichzeichen). Sonst
+   * quetschte ein einzelner Dauerlaeufer zehn Jahre in die Breite und das
+   * eigentliche Projekt in den linken Rand.
+   */
+  const focusDays = Math.max(1, diffDays(from, schedule.displayEnd) + 1);
+
   const totalDays = Math.max(1, diffDays(from, to) + 1);
-  const dayWidth = Math.min(
+  /** Grundbreite je Tag beim Zoomfaktor 1. */
+  const baseDayWidth = Math.min(
     MIN_DAY_WIDTH[prefs.ganttGranularity] ?? 4,
     Math.max(0.05, MAX_CHART_WIDTH / totalDays),
   );
+
+  /*
+   * Zoomstufe: passt sich beim Wechsel von Zeitraster oder Zeitraum
+   * automatisch so an, dass das ganze Projekt die Breite ausfuellt.
+   */
+  const box = useElementSize<HTMLDivElement>();
+  const chartZoom = useChartZoom({
+    /*
+     * Nur die Zeitachse wird gezoomt - die Beschriftungsspalte links und die
+     * Innenabstaende bleiben gleich breit. Sie gehoeren deshalb NICHT in
+     * `naturalWidth`, sondern werden von der verfuegbaren Breite abgezogen.
+     */
+    naturalWidth: Math.max(1, focusDays * baseDayWidth),
+    availableWidth: Math.max(120, box.width - LABEL_WIDTH - PADDING * 2 - 2),
+    resetKey: `${prefs.ganttGranularity}|${from}|${schedule.displayEnd}|${Math.round(box.width)}`,
+  });
+
+  const dayWidth = baseDayWidth * chartZoom.zoom;
   const chartWidth = Math.max(420, totalDays * dayWidth);
   const width = LABEL_WIDTH + chartWidth + PADDING * 2;
   const height = HEADER_HEIGHT + rows.length * ROW_HEIGHT + PADDING * 2;
@@ -112,8 +148,9 @@ export function GanttChart({
   const milestones = rows.filter((row) => row.task.milestone && !row.st.openEnded);
 
   return (
-    <div className="viz viz--plain">
+    <div className="viz viz--plain" ref={box.ref}>
       <div className="viz__controls">
+        <ChartZoomControls zoom={chartZoom} />
         <ExportPngButton svgRef={svgRef} namePrefix="mpt-gantt" />
       </div>
 
@@ -241,6 +278,7 @@ export function GanttChart({
               {!st.openEnded && st.slack > 0 && slackEnd > barEnd && (
                 <rect
                   className="gantt__bar gantt__bar--slack"
+                  rx={4}
                   x={barEnd}
                   y={y + 4}
                   width={Math.max(2, slackEnd - barEnd)}
@@ -252,6 +290,7 @@ export function GanttChart({
               {!st.openEnded && uncertainEnd > barEnd && (
                 <rect
                   className="gantt__bar gantt__bar--uncertain"
+                  rx={4}
                   x={barEnd}
                   y={y + 2}
                   width={Math.max(2, uncertainEnd - barEnd)}
@@ -263,6 +302,7 @@ export function GanttChart({
               {/* Hauptbalken */}
               <rect
                 className={`gantt__bar${movable ? ' gantt__bar--movable' : ''}`}
+                rx={4}
                 x={barX}
                 y={y + 2}
                 width={Math.max(3, (st.openEnded ? x(to) + dayWidth : barEnd) - barX)}

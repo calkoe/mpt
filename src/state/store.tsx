@@ -36,7 +36,14 @@ import { claimLock, inspectLock, releaseLock } from '../persistence/lock';
 
 const UNDO_LIMIT = 200;
 const COALESCE_MS = 1200;
-const AUTOSAVE_DEBOUNCE_MS = 700;
+/**
+ * Wartezeit bis zum Zurueckschreiben. Jede weitere Aenderung setzt sie zurueck,
+ * es wird also erst nach einer echten Pause geschrieben. Fuenf Sekunden sind
+ * bewusst grosszuegig: ein Schreibvorgang auf einem Netzlaufwerk kostet spuerbar
+ * Zeit, und Datenverlust droht dadurch nicht - `Strg+S` und das Schliessen der
+ * Seite schreiben weiterhin sofort.
+ */
+const AUTOSAVE_DEBOUNCE_MS = 5000;
 
 export type SaveState =
   | { kind: 'no-file' }
@@ -56,6 +63,8 @@ export interface UiState {
   mode: ViewMode;
   selectedTaskId: Id | null;
   selectedResourceId: Id | null;
+  /** Tag-Filter der Aufgabenansicht; leer = alle Aufgaben. */
+  tagFilter: Id[];
   /** Aktives Feld, in das per Klick in der Visualisierung übernommen wird. */
   pickTarget: null | { field: 'dependsOn' | 'parallelWith'; taskId: Id };
 }
@@ -205,6 +214,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     mode: 'tasks',
     selectedTaskId: null,
     selectedResourceId: null,
+    tagFilter: [],
     pickTarget: null,
   } satisfies UiState);
 
@@ -364,6 +374,22 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (timerRef.current) window.clearTimeout(timerRef.current);
     };
   }, [data.db, data.dirty, handle, readOnly, performWrite]);
+
+  /*
+   * Nach dem Verbinden einer Datei einmal schreiben.
+   *
+   * Damit ist sofort belegt, dass Schreibrechte bestehen und der Sperrvermerk
+   * in der Datei steht - statt das erst bei der ersten Aenderung zu erfahren,
+   * wenn man schon eine Weile gearbeitet hat. Muss im Store liegen: zum
+   * Zeitpunkt von `attachFile` kennt der Aufrufer den neuen Handle noch nicht.
+   */
+  const writtenFor = useRef<FileSystemFileHandle | null>(null);
+  useEffect(() => {
+    if (!handle || readOnly) return;
+    if (writtenFor.current === handle) return;
+    writtenFor.current = handle;
+    void performWrite();
+  }, [handle, readOnly, performWrite]);
 
   // --- Sperre am Leben halten -------------------------------------------
   // Regelmäßiges Lebenszeichen, damit andere sehen, dass die Datei noch in

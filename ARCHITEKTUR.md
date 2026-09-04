@@ -67,6 +67,11 @@ Deshalb ist die gesamte Fachlogik ohne DOM testbar – und genau dort liegen die
 
 - `anchor: 'date'` → Start ist gesetzt. `anchor: 'dependency'` → Start = spätestes Vorgängerende + 1 Arbeitstag.
 - Dauer ist eine Spanne (`durationMin`/`durationMax`); das Szenario (`'min'`/`'max'`) wählt den Rechenwert.
+- **Status `operations` ("Betrieb") zählt wie `done`.** Nie direkt auf `=== 'done'` prüfen, immer
+  `isSettled(status)` aus `model/types.ts` verwenden - sonst gilt eine Aufgabe im Betrieb je nach
+  Codestelle mal als erledigt und mal nicht.
+- **Ob ein Vorhaben abgeschlossen ist, wird abgeleitet** (`isVentureDone()` in `engine/validate.ts`):
+  alle Aufgaben erledigt oder im Betrieb. Es gibt dafür kein gespeichertes Feld.
 - Ein explizites `end` überschreibt die Dauer (nur bei festem Start).
 - **Dauerläufer haben schlicht kein Enddatum**: `durationMax === 0` und kein `end`. Es gibt dafür kein
   eigenes Kennzeichen im Schema – `isOpenEnded(schedule)` in `model/types.ts` ist die einzige Quelle
@@ -138,11 +143,40 @@ werden (`fill: none` an Kanten), sonst füllt das Bild sie schwarz aus.
 | `components/useElementSize.ts`                      | Misst eine Fläche per ResizeObserver – für SVGs, die die verfügbare Höhe ausfüllen sollen.           |
 | `components/taskPalette.ts`                         | Blau-/Türkistöne je Aufgabe für die gestapelten Ganglinien. Bewusst getrennt von der Tag-Palette.    |
 | `components/ExportPngButton.tsx`                    | Sitzt an der jeweiligen Grafik, weil nur dort eindeutig ist, welches SVG gemeint ist.                |
+| `components/useChartZoom.ts`                        | Zoomstufe der Zeitdiagramme; passt sich beim Wechsel von Raster oder Zeitraum automatisch ein.       |
+| `components/useReorder.ts`                          | Umsortieren von Listen per Ziehen (HTML5-Drag). Reihenfolge = Array-Reihenfolge, ein normaler Commit.|
+| `components/PeriodPicker.tsx`                       | Zeitraum in Quartalen/Jahren. Speichert weiterhin ISO-Daten - das Modell bleibt unverändert.         |
+| `components/TagFilter.tsx`                          | Tag-Filter als Aufklappmenü, in Aufgaben- und Ressourcenansicht identisch.                           |
+| `components/CostFields.tsx`                         | Eine Kostenposition zum Bearbeiten - genutzt von der Aufgaben- **und** der Budgetseite.              |
 | `Sidebar.tsx` / `TopBar.tsx` / `CommandPalette.tsx` | Rahmen der Anwendung.                                                                                |
 | `tasks/`                                            | Aufgabenübersicht: `NetworkChart`, `GanttChart`, `ResourceRailLayer`, `TaskEditor`.                  |
 | `resources/`                                        | Ressourcenübersicht: `ResourceChart`, `ResourceTable`, `ResourceEditors`.                            |
 | `dialogs/`                                          | Checkpoint-Verlauf, KI-Austausch, Warnzentrum, Tag-Verwaltung, Kurzanleitung.                        |
 | `ErrorBoundary.tsx`                                 | Verhindert den weißen Bildschirm bei unerwarteten Zuständen.                                         |
+
+**SVG-Geometrie gehört ins JSX, nicht ins CSS.** `rx`, `ry`, `x`, `y`, `width`, `height` als
+CSS-Eigenschaften funktionieren in Safari nicht - die Ecken bleiben dort eckig. Solche Werte immer
+als Attribut setzen.
+
+**Aufklappmenüs in Werkzeugleisten brauchen ein Portal.** `.panel__head` scrollt waagerecht, und
+sobald eine Überlaufachse nicht `visible` ist, macht CSS die andere automatisch zu `auto` - ein
+Menü darin wird abgeschnitten, egal wie hoch der z-index ist. Siehe `components/TagFilter.tsx`.
+
+**Bei Zieh-Interaktionen keinen React-Zustand je Mausbewegung setzen.** Ein `setState` pro
+`pointermove` rendert die ganze Visualisierung neu. Stattdessen das `transform` direkt am Element
+setzen (gedrosselt über `requestAnimationFrame`) und erst beim Loslassen committen - siehe
+`useNodeDrag` in `NetworkChart.tsx`.
+
+**Zeitachse und Zoomstufe sind zwei verschiedene Dinge.** Gezeichnet wird bis `horizonEnd` (zehn
+Jahre, damit Dauerläufer ihre Kosten wirklich prognostizieren); die automatische Zoomstufe richtet
+sich nach `displayStart`..`displayEnd`, also nach dem Ende der letzten endlichen Aufgabe.
+
+**Eingaben schreiben verzögert - Textfelder wie Regler.** `useDeferredCommit` in
+`components/controls.tsx` hält den Wert lokal und meldet ihn erst nach einer kurzen Pause nach oben;
+Regler zusätzlich sofort beim Loslassen. Grund: jeder Commit klont den gesamten Datenbestand und
+lässt CPM und Ressourcenlast neu rechnen - pro Tastendruck oder Reglerschritt war das die Ursache
+spürbarer Trägheit. **Rohe `<input>` deshalb vermeiden**, sonst fällt eine Stelle wieder aus dem
+Muster.
 
 **Löschen** läuft immer über `ConfirmButton`: der erste Klick versetzt denselben Knopf in einen
 blinkenden Bestätigungszustand, der zweite Klick innerhalb von 3 Sekunden führt die Aktion aus.
@@ -292,6 +326,11 @@ Bewusst nicht umgesetzt (Stand v1.2.0), damit niemand danach sucht:
   sich der Termin aus dem Netz – ein Ziehen hätte dort keine definierte Bedeutung.
 - Der PNG-Export einer sehr breiten Grafik (Gantt mit Dauerläufern) enthält nur den sichtbaren
   Ausschnitt; ein Bild über 5000 Zeichenkoordinaten Breite wäre nicht mehr brauchbar.
+- Netzplan-Verschiebungen sind **relative Versätze** (`task.layout`), keine festen Positionen. Das
+  Auto-Layout bleibt dadurch wirksam; eine frei gewählte Anordnung im Sinne eines Zeichenprogramms
+  gibt es nicht.
+- Zeiträume (Verfügbarkeit, Obergrenzen, Bedarfe) werden in **Quartalen und Jahren** erfasst.
+  Taggenaue Grenzen lassen sich nur noch über den JSON- oder KI-Weg setzen.
 - **Automatisches Speichern setzt Chrome/Edge UND einen sicheren Kontext voraus.** Die File System
   Access API fehlt nicht nur in Safari und Firefox, sie verschwindet in Chrome auch auf `file://`
   (Doppelklick) und auf `http://` abseits von `localhost`. `fileAccessStatus()` in

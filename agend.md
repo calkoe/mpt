@@ -429,3 +429,156 @@ versehentlich von Hand eingecheckt werden.
   und auf `http://` abseits von `localhost` - beides wurde als "Browser kann das nicht" gemeldet und
   führte auf die falsche Fährte. `fileAccessStatus()` unterscheidet jetzt zwischen unsicherem
   Kontext, direkt geöffneter Datei, eingebettetem Rahmen und fehlender Browser-Unterstützung.
+
+## v1.3.0 — Schema 3, Leistung und 34 Verbesserungen
+
+Schema auf **Version 3** gehoben (Migration von 2 vorhanden, Sicherungskopie wird automatisch
+angelegt). Alle zehn Modelländerungen stecken in einem einzigen Migrationsschritt — zehn einzelne
+Schritte wären zehnmal so viel Risiko für bestehende Dateien.
+
+**Schemaänderungen:**
+
+- `Task.notes` (Freitext) und `Venture.description` entfallen ersatzlos.
+- `Venture.done` entfällt: ob ein Vorhaben abgeschlossen ist, wird jetzt **abgeleitet** — alle
+  Aufgaben erledigt oder im Betrieb (`isVentureDone()`). Ein gespeicherter Schalter daneben wäre
+  vom Aufgabenstand abgewichen, sobald jemand eine Aufgabe wieder öffnet.
+- Status `blocked` → `operations` ("Betrieb"): inhaltlich fertig, bindet aber dauerhaft Ressourcen.
+  Zählt wie `done` gegenüber Nachfolgern und Vorhabenstatus, mit dunkelgrüner Statusfarbe.
+  **Bestehende blockierte Aufgaben werden `open`**, nicht `operations` — die beiden Zustände
+  bedeuten das Gegenteil voneinander, und "erledigt" hat die Datei nie ausgesagt.
+- `Task.layout` neu: relativer Versatz im Netzplan.
+- `Person.tagIds` und `Budget.tagIds` neu — auch Ressourcen sind jetzt taggbar.
+- `Budget.kind` neu: Neutral / Beauftragung / Investment.
+- `PersonAssignment.periods` neu: abweichende Bedarfe je Zeitraum, Grundwert gilt weiterhin.
+- `CostItem.actualAmount` neu: Kosten unterscheiden geplant und abgerufen.
+
+**Trägheit behoben.** Die Ursache lag nicht am Speichern: jeder Tastendruck klonte den gesamten
+Datenbestand und ließ Terminplan *und* Ressourcenlast über den Zehnjahreshorizont neu rechnen.
+`TextInput`/`TextArea` halten ihren Wert jetzt selbst und schreiben erst nach 300 ms Ruhe.
+Nachgemessen: 30 Anschläge erzeugen **einen** Commit statt 30, 0,38 ms je Anschlag. Zusätzlich
+wurde die Speicherverzögerung von 700 ms auf 5 s erhöht (`Strg+S` und das Schließen schreiben
+weiterhin sofort). Steht beim Wechsel der Auswahl noch eine Eingabe aus, wird sie an ihr
+ursprüngliches Ziel geschrieben — sonst landete der Rest eines Namens in der falschen Aufgabe.
+
+**Engine:**
+
+- Kumulierte Summe je Ressource über den gesamten Zeitraum, mit **eigener Achse rechts** im
+  Diagramm. Für Budgets in Euro, für Personen in Personentagen (FTE ist eine Rate und lässt sich
+  nicht aufsummieren). Die Linie steigt monoton, ihre Steigung zeigt den Bedarf je Zeiteinheit.
+- Bedarfszeiträume wirken tageweise; Zeiträume ausserhalb der Aufgabenlaufzeit werden zugeschnitten
+  **und gemeldet** — ohne Meldung wäre der Aufwand stillschweigend verschwunden.
+
+**Netzplan:**
+
+- Die Ressourcenleiste wird jetzt **vor** den Knoten gezeichnet. Ihre gestrichelten Verbindungen
+  liefen vorher quer über die Knoten der unteren Reihen — das war die gemeldete "Linie dahinter".
+- Linke Kante sauber: Fläche, geclippter Inhalt, Umrandung zuletzt. Der Statusstreifen stiess vorher
+  über die abgerundete Ecke hinaus und wurde von der Umrandung gekreuzt.
+- Knoten sind **verschiebbar**; gespeichert wird der Versatz gegenüber der berechneten Position.
+  Das Auto-Layout bleibt aktiv — nachgewiesen: nach dem Hinzufügen einer Abhängigkeit wandert der
+  Knoten eine Ebene weiter und behält seinen Versatz. Neuer Knopf "Ansicht zurücksetzen".
+- `Strg+C` / `Strg+V` dupliziert die gewählte Aufgabe.
+- Parallelität verlässt die Knoten oben/unten statt seitlich — waagerecht heisst "erst A, dann B",
+  senkrecht heisst "gleichzeitig".
+- Tagfärbung der Knoten entfällt (Knotenfarbe = Status); Tags erscheinen als kleine Textmarken mit
+  farbigem Hintergrund am unteren Rand. Knoten von 190 auf 216 px verbreitert.
+
+**Diagramme:**
+
+- "Tag" aus der Zeitauswahl entfernt; Zoomstufe an allen Zeitdiagrammen, die beim Wechsel von
+  Raster oder Zeitraum automatisch den gesamten Zeitraum über die volle Breite legt.
+
+**Ressourcen:**
+
+- Kacheln füllen die Reihe (`auto-fill`) statt fester zwei Spalten.
+- Listen per Ziehen sortierbar, mit Mouseover; "Details" als Knopf.
+- FTE-Regler auf 0–1 in 0,1-Schritten begrenzt — mehr als eine volle Stelle kann eine Person nicht sein.
+- Budget-Art wählbar, Gesamtsummen darunter getrennt nach Art.
+- Tags an Personen und Budgets.
+- Zeiträume werden in **Quartalen und Jahren** gewählt statt taggenau.
+
+**Seitenleiste und Editoren:**
+
+- Vorhaben per Ziehen sortierbar; "Erledigt"-Anzeige und Fortschrittsbalken entfallen, es bleibt die
+  Aufgabenzahl.
+- Checkliste rückt unter die Kurzbeschreibung, der Freitext-Abschnitt verschwindet.
+- Padding unter den Editoren, damit Auswahllisten nicht am Bildschirmrand kleben.
+- Tag-Filter als Aufklappmenü, jetzt auch in der Aufgabenansicht.
+- In den Verknüpfungs-Auswahlen stehen Aufgaben des aktuellen Vorhabens oben.
+
+**Persistenz:** nach dem Öffnen einer Datei wird einmal zurückgeschrieben — damit sind Schreibrechte
+und Sperrvermerk sofort belegt statt erst bei der ersten Änderung.
+
+### v1.3.0 — Nachbesserungen aus der Sichtprüfung
+
+**Safari-Ursache gefunden.** Der Rahmen um die Aufgaben sah dort falsch aus, weil `rx`/`ry` in
+`app.css` standen: **Safari unterstützt SVG-Geometrieeigenschaften in CSS nicht.** Die Ecken blieben
+eckig, während der Clip-Pfad rund war. Die Werte stehen jetzt als Attribut im JSX — deshalb sahen
+die Vorhaben links (normales HTML mit `border-radius`) auch in Safari immer richtig aus.
+
+**Ziehen im Netzplan war zäh**, weil jede Mausbewegung einen React-Zustand setzte und damit den
+gesamten Plan neu rendern liess. Jetzt wird während des Ziehens nur das `transform` des gezogenen
+Knotens direkt am DOM gesetzt, gedrosselt auf einen Bildaufbau; ein Commit entsteht erst beim
+Loslassen. Nachgemessen: **0,01 ms je Mausbewegung, null Neuberechnungen** (vorher eine komplette
+Neuberechnung pro Bewegung).
+
+**Tag-Menü wurde abgeschnitten.** Die Werkzeugleiste scrollt waagerecht — und sobald eine
+Überlaufachse nicht `visible` ist, macht CSS die andere automatisch zu `auto`. Kein z-index half.
+Das Menü hängt jetzt per Portal am `body`.
+
+**Zeitachsen und Zoomstufe getrennt.** Gezeichnet wird weiterhin der volle Zehnjahreshorizont, und
+Dauerläufer prognostizieren ihre Kosten auch so lange. Die **automatische Zoomstufe** richtet sich
+aber nur nach dem Ende der letzten endlichen Aufgabe (plus etwas Luft fürs Unendlichzeichen) —
+vorher quetschte ein einzelner Dauerläufer zehn Jahre in die Breite und das Projekt an den linken
+Rand. Die Achsen beginnen zusätzlich rund drei Wochen vor heute (`displayStart`).
+
+**Warnstufen.** Neu `critical` neben `warn` und `info`: überschrittene Grenzen (überlastet, Budget
+gerissen, Zyklus) sind rot, enge Lagen ab 90 % orange, noch nicht fällige Hinweise neutral. Der
+Zähler in der Kopfzeile trägt die Farbe des schwersten Befunds.
+
+**Weiteres:**
+
+- Tags haben oben etwas Luft und erscheinen **identisch an Ressourcenblöcken** im Netzplan
+  (gemeinsames Modul `TagBadges`).
+- Das Rechenergebnis ("22.09.2026 → 26.10.2026 · 25 AT · Puffer 4 AT") steht neben der Überschrift
+  "Aufgabe bearbeiten" statt mitten im Formular.
+- Der heutige Tag ist in allen Zeitdiagrammen eine **grüne gestrichelte Senkrechte** — eine
+  Ortsangabe, kein Alarm; Rot bleibt überschrittenen Grenzen vorbehalten.
+- Sortieren per Ziehen sieht überall gleich aus (gemeinsame Klasse `.sortable`, Einfügebalken als
+  Pseudoelement statt `box-shadow` — der kollidierte mit dem Randstreifen des aktiven Vorhabens).
+- Summenbeschriftung im Diagramm entfernt (steht im Titel); die kumulierte Linie behält ihre eigene
+  Achse rechts.
+- Freitextsuche in der Titelleiste der Ganglinien, wirkt auf Diagramme **und** Listen.
+- "Details" nur noch an den Ganglinien, dort als richtiger Knopf.
+
+**Kleiner Feinschliff danach:**
+
+- Ressourcenblöcke im Netzplan behalten ihre einheitliche Höhe, der Inhalt rutscht ohne Tags aber in
+  die Mitte - sonst blieb unten ein totes Loch.
+- Die gestrichelten Zuordnungslinien sind deutlich zurückhaltender (Deckkraft 0,35 → 0,18): sie sind
+  Beiwerk, der Plan ist die Hauptsache.
+- Die Detailzeile unter den Ganglinien hat eine **feste** Höhe. Vorher wuchs sie beim Überfahren,
+  dadurch schrumpfte die Zeichenfläche darüber, das Diagramm mass sich neu und die Kachel zuckte bei
+  jeder Mausbewegung.
+- `useElementSize` misst jetzt `clientWidth`/`clientHeight` statt `getBoundingClientRect()`. Letzteres
+  zählt eine sichtbare Bildlaufleiste mit - das Diagramm wurde um genau deren Dicke zu hoch und
+  schnitt sich die eigene Achsenbeschriftung ab.
+
+### Kosten: geplant und abgerufen (Schema 4)
+
+`CostItem.note` neu - eine kurze Notiz je Zuordnung (Bestellnummer, Stand der Abrechnung).
+Migration 3 -> 4 ergänzt sie leer.
+
+- Jede Kostenposition zeigt **geplant** und **abgerufen** nebeneinander. Ein Schieber legt den
+  geplanten Betrag anteilig um (0-100 %), das Feld daneben nimmt einen genauen Euro-Betrag entgegen -
+  beides schreibt auf dasselbe Feld.
+- **Dieselben Felder in beide Richtungen:** von der Aufgabe aus mit dem Budget als Überschrift, vom
+  Budget aus mit der Aufgabe als Überschrift. Ein Bauteil (`components/CostFields.tsx`), keine
+  zweite Abschrift. Auf der Budgetseite stehen darunter die Summen geplant / abgerufen / offen.
+- Der Gewichtungsbalken am Netzplan-Knoten zeigt bei Gewichtung nach Kosten den **Abrufstand**: die
+  Balkenlänge ist der geplante Betrag, der grün gefüllte Teil das bereits Abgerufene.
+- **Regler schreiben erst beim Loslassen** in den Datenbestand (die kurze Verzögerung bleibt als Netz
+  für Pfeiltasten und abgebrochene Berührungen). Vorher lief pro Reglerpixel ein Commit mit tiefer
+  Kopie und Neuberechnung. Nachgemessen: 21 Reglerschritte erzeugen **null** Neuberechnungen, ein
+  Commit beim Loslassen. Gilt für alle Regler - Dauer, FTE, Obergrenzen, Anteil.
+

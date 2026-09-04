@@ -38,6 +38,13 @@ export interface ZoomPan {
   userAdjusted: boolean;
   zoomBy: (factor: number) => void;
   setScale: (scale: number) => void;
+  /**
+   * Markiert die Ansicht als "vom Nutzer bestimmt", ohne selbst zu zoomen.
+   * Noetig z.B. beim Verschieben eines Knotens: dadurch aendert sich die
+   * Groesse des Inhalts, und ohne diese Markierung wuerde sich die Ansicht
+   * sofort neu einpassen - der Plan springt einem unter der Hand weg.
+   */
+  markAdjusted: () => void;
   reset: () => void;
   /** Passt den gesamten Inhalt in die sichtbare Fläche ein. */
   fit: (content: Box) => void;
@@ -181,5 +188,6 @@ export function useZoomPan(): ZoomPan {
     fit,
     focusOn,
     onPointerDown,
+    markAdjusted: () => setUserAdjusted(true),
   };
 }

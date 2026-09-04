@@ -16,7 +16,7 @@ import { GuideDialog } from './ui/dialogs/GuideDialog';
 import { WarningCenter } from './ui/dialogs/WarningCenter';
 import { useStore } from './state/store';
 import { usePreferences } from './state/preferences';
-import { createTask, createVenture } from './model/factory';
+import { createTask, createVenture, duplicateTask } from './model/factory';
 import { isFileSystemAccessSupported, recallHandle } from './persistence/fileStore';
 import { APP_VERSION, PROJECT_URL } from './version';
 
@@ -31,6 +31,9 @@ export function App() {
   // Nur für den einmaligen Blick beim Start - siehe unten.
   const prefsRef = useRef(prefs);
   prefsRef.current = prefs;
+
+  /** Zuletzt mit Strg+C gemerkte Aufgabe (nur die Id, der Rest wird frisch gelesen). */
+  const clipboard = useRef<string | null>(null);
 
   // Zuletzt verwendete Datei anbieten (Handle liegt in IndexedDB).
   useEffect(() => {
@@ -89,6 +92,33 @@ export function App() {
       }
       if (event.key === 'Escape' && store.ui.pickTarget) {
         store.setUi({ pickTarget: null });
+        return;
+      }
+
+      /*
+       * Aufgaben kopieren. Bewusst eine eigene Ablage statt der System-
+       * Zwischenablage: die Aufgabe wird als Objekt uebernommen, nicht als
+       * Text, und Kopieren in einem Textfeld soll weiterhin Text kopieren.
+       */
+      if (mod && event.key.toLowerCase() === 'c' && !isTyping() && store.ui.selectedTaskId) {
+        const task = store.client.tasks.find((t) => t.id === store.ui.selectedTaskId);
+        if (task) {
+          event.preventDefault();
+          clipboard.current = task.id;
+        }
+        return;
+      }
+      if (mod && event.key.toLowerCase() === 'v' && !isTyping() && clipboard.current) {
+        const source = store.client.tasks.find((t) => t.id === clipboard.current);
+        if (!source) return;
+        event.preventDefault();
+        const copy = duplicateTask(source);
+        store.commitClient('Aufgabe kopiert', (c) => {
+          c.tasks.push(copy);
+        });
+        // Den Vorhabenfilter nicht anfassen: steht er auf "Alle Vorhaben",
+        // wuerde das Einfuegen die Ansicht sonst unerwartet einschraenken.
+        store.setUi({ mode: 'tasks', selectedTaskId: copy.id });
         return;
       }
 
