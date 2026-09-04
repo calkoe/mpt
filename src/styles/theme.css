@@ -1,0 +1,147 @@
+/*
+ * Designsprache des MPT.
+ *
+ * Ein einziger Satz semantischer Variablen, der in Light und Dark identisch
+ * heisst. Komponenten greifen ausschliesslich auf diese Variablen zu - nie auf
+ * konkrete Farbwerte. Das haelt beide Themes automatisch konsistent.
+ *
+ * Skalen:
+ *   --sp-*  Abstaende (4px-Raster)
+ *   --fs-*  Schriftgroessen
+ *   --r-*   Radien
+ */
+
+:root {
+  color-scheme: light;
+
+  /* Abstaende */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 24px;
+  --sp-6: 32px;
+
+  /* Radien */
+  --r-sm: 5px;
+  --r-md: 8px;
+  --r-lg: 12px;
+  --r-full: 999px;
+
+  /* Typografie */
+  --font-sans:
+    "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  --font-mono:
+    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  --fs-xs: 11px;
+  --fs-sm: 12px;
+  --fs-md: 13px;
+  --fs-lg: 15px;
+  --fs-xl: 19px;
+
+  --transition: 120ms cubic-bezier(0.2, 0, 0.2, 1);
+
+  /* Höhe der Titelleiste - bewusst schmal, mit etwas Luft nach oben/unten. */
+  --topbar-h: 34px;
+  /* Gemeinsame Höhe von Titelfeld und Statusblock im Aufgaben-Editor. */
+  --titlerow-h: 34px;
+
+  /* Flaechen */
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --surface-2: #f0f2f5;
+  --surface-3: #e6e9ee;
+  --overlay: rgba(18, 22, 31, 0.38);
+
+  /*
+   * Linien und Text sind auf WCAG-Kontraste gerechnet:
+   * Text mindestens 4.5:1 gegen --surface UND --surface-2,
+   * Bedienelement-Grenzen mindestens 3:1 gegen --surface.
+   */
+  --border: #dcdfe6;
+  --border-strong: #91949c;
+
+  /* Text */
+  --text: #1a1d24;
+  --text-muted: #5f6672;
+  --text-faint: #696e79;
+  --text-inverse: #ffffff;
+
+  /* Akzent */
+  --accent: #3559d9;
+  --accent-hover: #2b49b6;
+  --accent-soft: #e7ecfc;
+  --accent-text: #ffffff;
+
+  /* Semantik */
+  --critical: #ba4151;
+  --critical-soft: #fbe9ec;
+  --warn: #9b6311;
+  --warn-soft: #fdf2df;
+  --ok: #1c7c59;
+  --ok-soft: #e3f4ec;
+  --info: #2b759b;
+
+  /* Aufgabenstatus */
+  --status-open: #8c93a1;
+  --status-active: #3559d9;
+  --status-blocked: #9b6311;
+  --status-done: #1c7c59;
+
+  /* Diagramme (dekorativ, daher bewusst zurückhaltend) */
+  --grid-line: #e8ebf0;
+  --grid-line-strong: #b4b9c3;
+  --chart-fill: rgba(53, 89, 217, 0.18);
+  --chart-stroke: #3559d9;
+  --chart-limit: #d1495b;
+  --shadow-sm: 0 1px 2px rgba(16, 22, 38, 0.07);
+  --shadow-md: 0 4px 14px rgba(16, 22, 38, 0.1);
+  --shadow-lg: 0 16px 44px rgba(16, 22, 38, 0.18);
+  --focus-ring: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent);
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg: #14161b;
+  --surface: #1b1e25;
+  --surface-2: #22262f;
+  --surface-3: #2b303a;
+  --overlay: rgba(5, 7, 11, 0.62);
+
+  --border: #2f343e;
+  --border-strong: #636974;
+
+  --text: #e7eaf0;
+  --text-muted: #a3aab8;
+  --text-faint: #868d9a;
+  --text-inverse: #14161b;
+
+  --accent: #6b8dff;
+  --accent-hover: #86a1ff;
+  --accent-soft: #232c48;
+  --accent-text: #10131a;
+
+  --critical: #f0748a;
+  --critical-soft: #3a222a;
+  --warn: #e6ac4d;
+  --warn-soft: #3a2f1c;
+  --ok: #52c69a;
+  --ok-soft: #1c3830;
+  --info: #6bb4d8;
+
+  --status-open: #767e8d;
+  --status-active: #6b8dff;
+  --status-blocked: #e6ac4d;
+  --status-done: #52c69a;
+
+  --grid-line: #262b34;
+  --grid-line-strong: #454b56;
+  --chart-fill: rgba(107, 141, 255, 0.22);
+  --chart-stroke: #6b8dff;
+  --chart-limit: #f0748a;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 18px 48px rgba(0, 0, 0, 0.6);
+}

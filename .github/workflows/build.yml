@@ -1,0 +1,200 @@
+name: Build & Release
+
+# Veroeffentlicht wird ausschliesslich ueber Versionstags.
+#
+#   git tag v1.2.0 && git push origin v1.2.0
+#
+# Der Tag muss
+#   - der Form vN.N.N entsprechen,
+#   - auf einem Commit sitzen, der in main enthalten ist,
+#   - zur `version` in package.json passen,
+#   - hoeher sein als der zuletzt veroeffentlichte Tag.
+#
+# Erst wenn all das stimmt, entsteht die index.html und landet in GitHub Pages
+# und im Release. dist/ ist in .gitignore - die ausgelieferte Datei kann damit
+# nur aus diesem Lauf stammen und nie versehentlich von Hand eingecheckt werden.
+#
+# Pushes und Pull Requests ohne Tag laufen weiterhin durch Typen, Tests und
+# Build - sie veroeffentlichen nur nichts.
+
+on:
+  push:
+    branches: [main]
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+# Je Ref eine eigene Gruppe. Mit einer gemeinsamen Gruppe wuerde der Push von
+# main den gleichzeitig startenden Tag-Lauf abbrechen - und damit genau die
+# Veroeffentlichung verschlucken, um die es geht.
+concurrency:
+  group: mpt-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Torwaechter: laeuft nur bei Tags und entscheidet, ob veroeffentlicht wird.
+  # ---------------------------------------------------------------------------
+  version-gate:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # gesamte Historie: fuer den Vergleich mit alten Tags
+
+      - name: Tag pruefen
+        id: check
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          echo "Tag: $TAG"
+
+          # 1. Form vN.N.N
+          if [[ ! "$TAG" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+            echo "::error::Tag '$TAG' hat nicht die Form vN.N.N."
+            exit 1
+          fi
+          VERSION="${TAG#v}"
+
+          # 2. Der Tag muss auf main sitzen - sonst waere jeder Seitenzweig
+          #    veroeffentlichbar. Der Checkout eines Tags legt keinen
+          #    main-Ref an, deshalb hier explizit holen.
+          git fetch --quiet origin +refs/heads/main:refs/remotes/origin/main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::Der Tag zeigt auf einen Commit, der nicht in main enthalten ist."
+            exit 1
+          fi
+
+          # 3. Version im Code muss zum Tag passen.
+          PKG=$(node -p "require('./package.json').version")
+          if [ "$PKG" != "$VERSION" ]; then
+            echo "::error::Tag $TAG passt nicht zur Version in package.json ($PKG). Erst die Version anheben, dann taggen."
+            exit 1
+          fi
+
+          # 4. Muss hoeher sein als der letzte veroeffentlichte Tag.
+          PREV=$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' | grep -v "^$TAG$" | sort -V | tail -n1 || true)
+          if [ -n "$PREV" ]; then
+            HIGHEST=$(printf '%s\n%s\n' "${PREV#v}" "$VERSION" | sort -V | tail -n1)
+            if [ "$HIGHEST" != "$VERSION" ] || [ "${PREV#v}" = "$VERSION" ]; then
+              echo "::error::Version $VERSION ist nicht hoeher als die zuletzt veroeffentlichte ($PREV)."
+              exit 1
+            fi
+            echo "Vorherige Version: $PREV"
+          else
+            echo "Erste Veroeffentlichung."
+          fi
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Freigegeben: $VERSION"
+
+  # ---------------------------------------------------------------------------
+  # Bauen und pruefen. Laeuft immer - auch ohne Tag.
+  # ---------------------------------------------------------------------------
+  build:
+    runs-on: ubuntu-latest
+    # Bei einem Tag erst nach der Freigabe bauen.
+    needs: [version-gate]
+    if: always() && (needs.version-gate.result == 'success' || needs.version-gate.result == 'skipped')
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Abhaengigkeiten installieren
+        run: npm ci
+
+      - name: Typen pruefen
+        run: npm run typecheck
+
+      - name: Tests
+        run: npm test
+
+      - name: Single-File-Build
+        run: npm run build
+
+      - name: Pruefen, dass genau eine index.html entsteht
+        run: |
+          set -euo pipefail
+          test -f dist/index.html
+          count=$(find dist -type f | wc -l)
+          echo "Dateien in dist: $count"
+          if [ "$count" -ne 1 ]; then
+            echo "::error::Build ist nicht single-file."
+            find dist -type f
+            exit 1
+          fi
+          echo "Groesse: $(du -h dist/index.html | cut -f1)"
+
+      - name: Pruefen, dass keine externen Referenzen enthalten sind
+        run: |
+          set -euo pipefail
+          if grep -qE '(src|href)="https?://' dist/index.html; then
+            echo "::error::Die gebaute Datei laedt externe Ressourcen - das verletzt die lokale Datenhaltung."
+            grep -oE '(src|href)="https?://[^"]*"' dist/index.html | sort -u
+            exit 1
+          fi
+          echo "Keine externen Referenzen."
+
+      - name: Pruefen, dass die Version im Build steht
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          set -euo pipefail
+          VERSION="${{ needs.version-gate.outputs.version }}"
+          if ! grep -q "$VERSION" dist/index.html; then
+            echo "::error::Version $VERSION taucht in der gebauten Datei nicht auf."
+            exit 1
+          fi
+          echo "Version $VERSION ist im Build enthalten."
+
+      - name: Artefakt hochladen
+        uses: actions/upload-artifact@v4
+        with:
+          name: mpt-html
+          path: dist/index.html
+
+      - name: Pages-Artefakt vorbereiten
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  # ---------------------------------------------------------------------------
+  # Veroeffentlichen - nur bei freigegebenem Versionstag.
+  # ---------------------------------------------------------------------------
+  deploy:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [version-gate, build]
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [version-gate, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: mpt-html
+      - name: Release anlegen
+        uses: softprops/action-gh-release@v2
+        with:
+          name: MPT ${{ github.ref_name }}
+          files: index.html
+          generate_release_notes: true
