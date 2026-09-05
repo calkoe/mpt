@@ -15,7 +15,7 @@ import { useState } from 'react';
 import { formatValue, type Breakdown } from '../../engine/resources';
 import { formatDateDe } from '../../engine/dates';
 import type { Id } from '../../model/types';
-import { MeasureAmount, MeasureLabel } from '../components/CostMeasure';
+import { MeasureLabel } from '../components/CostMeasure';
 import { Button, Modal } from '../components/controls';
 
 export function BreakdownTable({
@@ -30,29 +30,33 @@ export function BreakdownTable({
   const isBudget = breakdown.unit === 'EUR';
   const showResource = hasSeveralResources(breakdown);
   /*
-   * Die verfügbare Kapazität steht bei Personen als eigene Spalte: sie ist je
-   * Person verschieden und genau die Zahl, gegen die man die gebundene liest.
-   * Bei Budgets gibt es dagegen **eine** genehmigte Summe für die ganze
-   * Auswertung - die steht über der Tabelle, nicht als Spalte voller
-   * Wiederholungen.
+   * Die Spalten sind in beiden Fällen dieselben drei Grössen in derselben
+   * Reihenfolge: erst der Rahmen, dann die Absicht, dann das Abgeflossene.
+   * Bei Personen heissen sie "verfügbar" und "gebunden", bei Geld "genehmigt",
+   * "geplant" und "ausgegeben" - die Zeichen davor sind überall dieselben.
    */
-  const showCapacity = !isBudget && breakdown.rows.some((r) => r.resourceCeiling !== null);
+  const showCeiling = breakdown.rows.some((r) => r.resourceCeiling !== null);
+  /** Spalten vor den Zahlen - für den Fuss. */
+  const leadingColumns = showResource ? 2 : 1;
 
   if (breakdown.rows.length === 0) {
     return <div className="faint breakdown__empty">Keine Beiträge in diesem Zeitraum.</div>;
   }
 
+  const amount = (value: number) => formatValue(value, breakdown.unit);
+
   /*
-   * Die Kapazität gehört der Ressource, nicht der Aufgabe. Sie erscheint
-   * deshalb nur in der ersten Zeile einer Ressource - stünde sie in jeder,
-   * läse man sie als "verfügbar für diese Aufgabe".
+   * Der Rahmen gehört der Ressource, nicht der Aufgabe - er steht trotzdem in
+   * **jeder** Zeile, damit sich jede für sich lesen und in einer
+   * Tabellenkalkulation weiterverwenden lässt.
+   *
+   * Damit stimmt die Spalte nicht mit ihrer eigenen Summe überein: hat eine
+   * Person zwei Aufgaben, steht ihre Kapazität zweimal da, zählt unten aber
+   * einmal. Das ist Absicht und steht im Spaltenkopf.
    */
-  const seen = new Set<Id>();
-  const capacityOf = (row: (typeof breakdown.rows)[number]) => {
-    if (seen.has(row.resourceId)) return null;
-    seen.add(row.resourceId);
-    return row.resourceCeiling;
-  };
+  const ceilingHint = isBudget
+    ? 'Genehmigt für dieses Budget im Zeitraum. Steht in jeder Zeile; in der Summe zählt jedes Budget der Auswertung genau einmal - auch eines ohne Position.'
+    : 'Verfügbare Kapazität dieser Person im Zeitraum. Steht in jeder Zeile; in der Summe zählt jede Person der Auswertung genau einmal - auch eine ohne Position.';
 
   return (
     <table className="table breakdown">
@@ -60,23 +64,23 @@ export function BreakdownTable({
         <tr>
           {showResource && <th>Ressource</th>}
           <th>Aufgabe</th>
-          <th className="table__num">{isBudget ? <MeasureLabel measure="planned" /> : 'gebunden'}</th>
+          {showCeiling && (
+            <th className="table__num" title={ceilingHint}>
+              <MeasureLabel measure="approved">{isBudget ? undefined : 'verfügbar'}</MeasureLabel>
+            </th>
+          )}
+          <th className="table__num">
+            <MeasureLabel measure="planned">{isBudget ? undefined : 'gebunden'}</MeasureLabel>
+          </th>
           {isBudget && (
             <th className="table__num">
               <MeasureLabel measure="actual" />
             </th>
           )}
-          {showCapacity && (
-            <th className="table__num">
-              <MeasureLabel measure="approved">verfügbar</MeasureLabel>
-            </th>
-          )}
         </tr>
       </thead>
       <tbody>
-        {breakdown.rows.map((row) => {
-          const capacity = showCapacity ? capacityOf(row) : null;
-          return (
+        {breakdown.rows.map((row) => (
             <tr
               key={`${row.resourceId}-${row.taskId}`}
               className={onSelectTask ? 'breakdown__row--clickable' : undefined}
@@ -85,27 +89,27 @@ export function BreakdownTable({
             >
               {showResource && <td className="truncate">{row.resourceName}</td>}
               <td className="truncate">{taskLabel(row.taskId)}</td>
-              <td className="table__num mono">{formatValue(row.planned, breakdown.unit)}</td>
-              {isBudget && <td className="table__num mono">{formatValue(row.actual, breakdown.unit)}</td>}
-              {showCapacity && (
-                <td className="table__num mono faint">
-                  {capacity === null ? '' : formatValue(capacity, breakdown.unit)}
+              {showCeiling && (
+                <td className="table__num mono faint" title={ceilingHint}>
+                  {row.resourceCeiling === null ? '∞' : amount(row.resourceCeiling)}
                 </td>
               )}
+              <td className="table__num mono">{amount(row.planned)}</td>
+              {isBudget && <td className="table__num mono">{amount(row.actual)}</td>}
             </tr>
-          );
-        })}
+        ))}
       </tbody>
       <tfoot>
         <tr>
-          <td colSpan={showResource ? 2 : 1}>Summe</td>
-          <td className="table__num mono">{formatValue(breakdown.planned, breakdown.unit)}</td>
-          {isBudget && <td className="table__num mono">{formatValue(breakdown.actual, breakdown.unit)}</td>}
-          {showCapacity && (
-            <td className="table__num mono">
-              {breakdown.ceiling === null ? '∞' : formatValue(breakdown.ceiling, breakdown.unit)}
+          <td colSpan={leadingColumns}>Summe</td>
+          {/* Je Ressource einmal - nicht die Summe der Spalte darüber. */}
+          {showCeiling && (
+            <td className="table__num mono" title={ceilingHint}>
+              {breakdown.ceiling === null ? '∞' : amount(breakdown.ceiling)}
             </td>
           )}
+          <td className="table__num mono">{amount(breakdown.planned)}</td>
+          {isBudget && <td className="table__num mono">{amount(breakdown.actual)}</td>}
         </tr>
       </tfoot>
     </table>
@@ -120,42 +124,43 @@ export function BreakdownTable({
 export function breakdownToTsv(breakdown: Breakdown, taskLabel: (taskId: Id) => string): string {
   const isBudget = breakdown.unit === 'EUR';
   const showResource = hasSeveralResources(breakdown);
-  const showCapacity = !isBudget && breakdown.rows.some((r) => r.resourceCeiling !== null);
-  const rahmen = breakdown.ceiling === null ? 'unbegrenzt' : num(breakdown.ceiling);
+  const showCeiling = breakdown.rows.some((r) => r.resourceCeiling !== null);
+  const unit = breakdown.unit;
+  const frame = (value: number | null | undefined) =>
+    value === undefined ? '' : value === null ? 'unbegrenzt' : num(value);
 
   const head = [
     ...(showResource ? ['Ressource'] : []),
     'Aufgabe',
-    isBudget ? `Geplant (${breakdown.unit})` : `Gebunden (${breakdown.unit})`,
-    ...(isBudget ? [`Ausgegeben (${breakdown.unit})`] : []),
-    ...(showCapacity ? [`Verfuegbar (${breakdown.unit})`] : []),
+    ...(showCeiling ? [`${isBudget ? 'Genehmigt' : 'Verfuegbar'} (${unit})`] : []),
+    `${isBudget ? 'Geplant' : 'Gebunden'} (${unit})`,
+    ...(isBudget ? [`Ausgegeben (${unit})`] : []),
   ];
 
   /*
-   * Beim Kopieren steht die Kapazitaet in **jeder** Zeile, nicht nur in der
-   * ersten je Ressource: in einer Tabellenkalkulation wird gefiltert und
-   * sortiert, und eine leere Zelle waere dort schlicht ein fehlender Wert.
+   * Beim Kopieren steht der Rahmen in **jeder** Zeile, nicht nur in der ersten
+   * je Ressource: in einer Tabellenkalkulation wird gefiltert und sortiert, und
+   * eine leere Zelle waere dort schlicht ein fehlender Wert.
    */
   const lines = [
     `${breakdown.label}\t${formatDateDe(breakdown.from)} - ${formatDateDe(breakdown.to)}`,
-    ...(isBudget ? [`Genehmigt (${breakdown.unit})\t${rahmen}`] : []),
     '',
     head.join('\t'),
     ...breakdown.rows.map((row) =>
       [
         ...(showResource ? [row.resourceName] : []),
         taskLabel(row.taskId),
+        ...(showCeiling ? [frame(row.resourceCeiling)] : []),
         num(row.planned),
         ...(isBudget ? [num(row.actual)] : []),
-        ...(showCapacity ? [row.resourceCeiling === null ? 'unbegrenzt' : num(row.resourceCeiling)] : []),
       ].join('\t'),
     ),
     [
       ...(showResource ? [''] : []),
       'Summe',
+      ...(showCeiling ? [frame(breakdown.ceiling)] : []),
       num(breakdown.planned),
       ...(isBudget ? [num(breakdown.actual)] : []),
-      ...(showCapacity ? [rahmen] : []),
     ].join('\t'),
   ];
   return lines.join('\n');
@@ -242,7 +247,6 @@ export function BreakdownDialog({
   /** Genau eine Ressource? Dann gehört ihr Name über die Tabelle, nicht hinein. */
   const names = new Set(breakdown.rows.map((r) => r.resourceName));
   const only = names.size === 1 ? [...names][0] : '';
-  const isBudget = breakdown.unit === 'EUR';
 
   return (
     <Modal
@@ -260,19 +264,8 @@ export function BreakdownDialog({
         <div className="row">
           <span className="faint truncate" style={{ fontSize: 'var(--fs-sm)' }}>
             {only ? `${only} · ` : ''}
-            {formatDateDe(breakdown.from)} - {formatDateDe(breakdown.to)} · {breakdown.rows.length} Positionen
+            {formatDateDe(breakdown.from)} - {formatDateDe(breakdown.to)} · {breakdown.rows.length} {breakdown.rows.length === 1 ? 'Position' : 'Positionen'}
           </span>
-          {/*
-            Bei Geld steht der genehmigte Rahmen hier oben beim Zeitraum: es
-            gibt genau einen für die ganze Auswertung, als Tabellenspalte wäre
-            er in jeder Zeile derselbe. Bei Personen ist er je Person
-            verschieden und steht deshalb in der Tabelle.
-          */}
-          {isBudget && (
-            <span className="faint nowrap" style={{ fontSize: 'var(--fs-sm)' }}>
-              <MeasureAmount measure="approved" value={breakdown.ceiling} />
-            </span>
-          )}
           <span className="spacer" />
           <BreakdownCopyButton breakdown={breakdown} taskLabel={taskLabel} />
         </div>

@@ -35,7 +35,7 @@ import {
 } from './types';
 import { createDatabase, nextTagColor, newId } from './factory';
 import { APP_VERSION } from '../version';
-import { isValidIso, today } from '../engine/dates';
+import { isValidIso, nextWorkday, today, workdaysBetween } from '../engine/dates';
 
 type AnyRecord = Record<string, any>;
 
@@ -157,6 +157,63 @@ const MIGRATIONS: Record<number, (db: AnyRecord) => AnyRecord> = {
     schemaVersion: 7,
     clients: arr(db.clients).map((client) => ({ ...client, notes: [] })),
   }),
+
+  /**
+   * 7 -> 8: das feste Enddatum entfällt; das Ende ergibt sich immer aus
+   * Beginn und Dauer.
+   *
+   * Damit sich kein Termin verschiebt, wird ein gesetztes Ende in genau die
+   * Dauer umgerechnet, die die Terminrechnung bisher daraus gebildet hat:
+   * Arbeitstage vom (auf einen Werktag gerückten) Beginn bis zum Ende. Die
+   * Dauerspanne verliert dabei ihre Unschärfe - sie hatte bei einer solchen
+   * Aufgabe ohnehin keine Wirkung, weil das feste Ende beide Szenarien
+   * überschrieb.
+   */
+  7: (db) => ({
+    ...db,
+    schemaVersion: 8,
+    clients: arr(db.clients).map((client) => ({
+      ...client,
+      tasks: arr(client.tasks).map((task) => {
+        const schedule = { ...(task?.schedule ?? {}) };
+        const start = dateOrUndef(schedule.start);
+        const end = dateOrUndef(schedule.end);
+        if (schedule.anchor !== 'dependency' && start && end && end >= start) {
+          const dauer = workdaysBetween(nextWorkday(start), end);
+          schedule.durationMin = dauer;
+          schedule.durationMax = dauer;
+          schedule.durationUnit = 'days';
+        }
+        delete schedule.end;
+        return { ...task, schedule };
+      }),
+    })),
+  }),
+
+  /**
+   * 8 -> 9: die Einheit "Quartale" entfällt.
+   *
+   * Sie war exakt drei Monate - `addDuration` rechnete `Monat + 3n`, also
+   * dieselbe Rechnung wie bei Monaten. Zwei Schreibweisen für dieselbe Dauer
+   * bringen keinen Gewinn, kosten aber bei jeder Umstellung eine Fallgrube.
+   * Aus n Quartalen werden 3n Monate; alle Termine bleiben, wo sie sind.
+   */
+  8: (db) => ({
+    ...db,
+    schemaVersion: 9,
+    clients: arr(db.clients).map((client) => ({
+      ...client,
+      tasks: arr(client.tasks).map((task) => {
+        const schedule = { ...(task?.schedule ?? {}) };
+        if (schedule.durationUnit === 'quarters') {
+          schedule.durationUnit = 'months';
+          schedule.durationMin = num(schedule.durationMin) * 3;
+          schedule.durationMax = num(schedule.durationMax) * 3;
+        }
+        return { ...task, schedule };
+      }),
+    })),
+  }),
 };
 
 export interface MigrationResult {
@@ -205,7 +262,7 @@ export function migrate(raw: unknown): MigrationResult {
 // ---------------------------------------------------------------------------
 
 const STATUSES: TaskStatus[] = ['open', 'active', 'operations', 'done'];
-const DURATION_UNITS: DurationUnit[] = ['days', 'weeks', 'months', 'quarters', 'years'];
+const DURATION_UNITS: DurationUnit[] = ['days', 'weeks', 'months', 'years'];
 const BUDGET_KINDS: BudgetKind[] = ['neutral', 'order', 'investment'];
 
 export function normalizeDatabase(raw: AnyRecord, notes: string[] = []): Database {
@@ -342,8 +399,21 @@ function normalizeClient(raw: AnyRecord, notes: string[]): Client {
     }
 
     // Dauer 0 ist gültig und bedeutet "kein Enddatum" (Dauerläufer).
-    const durationMin = Math.max(0, Math.round(num(t?.schedule?.durationMin, num(t?.schedule?.duration, 5))));
-    const durationMax = Math.max(durationMin, Math.round(num(t?.schedule?.durationMax, durationMin)));
+    let durationMin = Math.max(0, Math.round(num(t?.schedule?.durationMin, num(t?.schedule?.duration, 5))));
+    let durationMax = Math.max(durationMin, Math.round(num(t?.schedule?.durationMax, durationMin)));
+    /*
+     * "Quartale" gibt es seit Schema 9 nicht mehr (ein Quartal = drei Monate).
+     * Hier steht die Umrechnung ein zweites Mal, weil die Reparatur auch
+     * greifen muss, wenn kein Migrationsschritt lief - etwa beim Rückspielen
+     * aus einem LLM. Ohne sie fiele die Einheit auf "Arbeitstage" zurück und
+     * aus zwei Quartalen würden zwei Tage.
+     */
+    let unit: DurationUnit = DURATION_UNITS.includes(t?.schedule?.durationUnit) ? t.schedule.durationUnit : 'days';
+    if (t?.schedule?.durationUnit === 'quarters') {
+      unit = 'months';
+      durationMin *= 3;
+      durationMax *= 3;
+    }
     const anchor = t?.schedule?.anchor === 'dependency' ? 'dependency' : 'date';
     const dependsOn = arr(t?.dependsOn).map(String).filter((d) => taskIds.has(d) && d !== str(t?.id));
 
@@ -364,10 +434,9 @@ function normalizeClient(raw: AnyRecord, notes: string[]): Client {
       schedule: {
         anchor,
         start: anchor === 'date' ? (dateOrUndef(t?.schedule?.start) ?? today()) : dateOrUndef(t?.schedule?.start),
-        end: dateOrUndef(t?.schedule?.end),
         durationMin,
         durationMax,
-        durationUnit: DURATION_UNITS.includes(t?.schedule?.durationUnit) ? t.schedule.durationUnit : 'days',
+        durationUnit: unit,
       },
       dependsOn,
       parallelWith: arr(t?.parallelWith).map(String).filter((d) => taskIds.has(d) && d !== str(t?.id)),

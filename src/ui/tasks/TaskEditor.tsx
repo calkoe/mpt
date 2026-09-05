@@ -6,7 +6,7 @@
  * eines an, der Rest ergibt sich. Bei Abhängigkeitsanker entfällt der eigene
  * Starttermin.
  */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   DURATION_UNIT_LABEL,
   TASK_STATUS_LABEL,
@@ -26,7 +26,7 @@ import {
   createPerson,
   createTag,
 } from '../../model/factory';
-import { addDuration, formatDateDe, formatDateTimeDe, sliderMaxFor, workdaysBetween } from '../../engine/dates';
+import { addDuration, formatDateDe, formatDateTimeDe, sliderMaxFor } from '../../engine/dates';
 import { formatDuration, wouldCreateCycle, type ScheduleResult } from '../../engine/schedule';
 import { isVentureDone, type Warning } from '../../engine/validate';
 import { useStore } from '../../state/store';
@@ -44,7 +44,7 @@ import {
   TextArea,
   TextInput,
 } from '../components/controls';
-import { PeriodPicker } from '../components/PeriodPicker';
+import { fitsScale, PeriodPicker } from '../components/PeriodPicker';
 import { CostFields } from '../components/CostFields';
 import { AssignmentFields } from '../components/AssignmentFields';
 
@@ -79,8 +79,24 @@ export function TaskEditor({
    */
   const durationUnit = task.schedule.durationUnit;
 
-  /** Taggenaue Datumsfelder sind eingeklappt; der Regelfall ist der Zeitraum. */
-  const [exactDates, setExactDates] = useState(false);
+  /**
+   * Taggenaues Datumsfeld oder Rasterauswahl - **nur für den Beginn**.
+   *
+   * Das Ende ergibt sich immer aus der Dauer (siehe `TaskSchedule`), die
+   * Umschaltung betrifft also wirklich nur die eine Eingabe darunter.
+   *
+   * Die Voreinstellung richtet sich nach dem Termin selbst: passt er auf ein
+   * Raster (Jahresanfang, Quartal, Monatsanfang, Montag), zeigt der Editor die
+   * Rasterauswahl - sonst das Datumsfeld. Eine Rasterauswahl, die einen
+   * taggenauen Termin nur ungefähr wiedergibt, ist schlimmer als keine: sie
+   * behauptet einen Zustand, in dem die Aufgabe gar nicht ist.
+   *
+   * `null` heisst "automatisch"; sobald jemand umschaltet, gilt seine Wahl -
+   * bis zur nächsten Aufgabe.
+   */
+  const [exactChoice, setExactChoice] = useState<boolean | null>(null);
+  useEffect(() => setExactChoice(null), [task.id]);
+  const exactDates = exactChoice ?? !fitsScale(task.schedule.start);
 
   return (
     <div className="editor">
@@ -152,8 +168,7 @@ export function TaskEditor({
               onChange={(anchor) =>
                 edit('Terminanker geändert', (t) => {
                   t.schedule.anchor = anchor as 'date' | 'dependency';
-                  if (anchor === 'dependency') t.schedule.end = undefined;
-                  else if (!t.schedule.start) t.schedule.start = st?.start;
+                  if (anchor === 'date' && !t.schedule.start) t.schedule.start = st?.start;
                 })
               }
               options={[
@@ -163,54 +178,56 @@ export function TaskEditor({
             />
           </Field>
 
-          {task.schedule.anchor === 'date' && !exactDates && (
-            <Field label="Beginn der Aufgabe" hint="Jahr, Quartal oder Monat - genauer geht es unten">
-              <PeriodPicker
-                mode="start"
-                from={task.schedule.start}
-                onChange={(from) =>
-                  edit('Beginn geändert', (t) => {
-                    t.schedule.start = from;
-                    // Das Ende ergibt sich aus der Dauer; ein alter fester
-                    // Endtermin passte danach nicht mehr zum neuen Beginn.
-                    t.schedule.end = undefined;
-                  })
-                }
-              />
-            </Field>
-          )}
-
-          {task.schedule.anchor === 'date' && exactDates && (
-            /* Zwei gleich breite Spalten, damit die Datumsfelder trotz
-               unterschiedlich langer Beschriftungen exakt bündig stehen. */
-            <div className="field-pair">
-              <Field label="Start">
+          {task.schedule.anchor === 'date' && (
+            /*
+              Eine Ueberschrift, zwei Eingabearten - der Umschalter steht
+              daneben, weil er genau zu dieser einen Zeile gehoert. Frueher
+              tauschte er die ganze Terminierung inklusive Enddatum aus; das
+              Ende kommt jetzt immer aus der Dauer, und damit bleibt nur noch
+              die Frage, wie grob der Beginn eingegeben wird.
+            */
+            <Field
+              label="Beginn der Aufgabe"
+              hint={exactDates ? 'Taggenau - das Ende ergibt sich aus der Dauer' : 'Jahr, Quartal, Monat oder Kalenderwoche'}
+              action={
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setExactChoice(!exactDates)}
+                  title={
+                    exactDates
+                      ? 'Beginn wieder über Jahr, Quartal, Monat oder Woche wählen'
+                      : 'Beginn auf den Tag genau eintragen'
+                  }
+                >
+                  {exactDates ? '← Raster wählen' : 'Taggenau eintragen →'}
+                </Button>
+              }
+            >
+              {exactDates ? (
                 <DateInput
                   value={task.schedule.start}
                   onChange={(start) => edit('Start geändert', (t) => { t.schedule.start = start || undefined; })}
                 />
-              </Field>
-              <Field label="Ende" hint="Setzt die Dauer">
-                <DateInput
-                  value={task.schedule.end}
-                  onChange={(end) =>
-                    edit('Ende geändert', (t) => {
-                      t.schedule.end = end || undefined;
-                      if (end && t.schedule.start) {
-                        const days = workdaysBetween(t.schedule.start, end);
-                        t.schedule.durationMin = days;
-                        t.schedule.durationMax = days;
-                        t.schedule.durationUnit = 'days';
-                      }
-                    })
-                  }
+              ) : (
+                <PeriodPicker
+                  /* Neue Aufgabe, neuer Termin: die Stufe wird frisch aus ihm
+                     abgeleitet statt von der vorigen Aufgabe übernommen. */
+                  key={task.id}
+                  mode="start"
+                  from={task.schedule.start}
+                  onChange={(from) => edit('Beginn geändert', (t) => { t.schedule.start = from; })}
                 />
-              </Field>
-            </div>
+              )}
+            </Field>
           )}
 
-          {!exactDates && (
-          <>
+          {/*
+            Die Dauer gilt für beide Anker: auch wer vom Vorgänger startet,
+            muss sagen, wie lange die Aufgabe dauert. Sie war hier einmal an
+            die Rasterauswahl gekoppelt und fehlte dadurch genau denen, die
+            keinen festen Starttermin gesetzt hatten.
+          */}
           <Field
             label="Dauer angeben in"
             hint="AT zählt Arbeitstage, alles andere ist Kalenderzeit"
@@ -220,7 +237,7 @@ export function TaskEditor({
               ariaLabel="Einheit der Dauer"
               value={durationUnit}
               onChange={(unit) => edit('Dauereinheit geändert', (t) => { t.schedule.durationUnit = unit; })}
-              options={(['days', 'weeks', 'months', 'quarters', 'years'] as DurationUnit[]).map((u) => ({
+              options={(['days', 'weeks', 'months', 'years'] as DurationUnit[]).map((u) => ({
                 value: u,
                 label: DURATION_UNIT_LABEL[u],
                 title:
@@ -247,7 +264,6 @@ export function TaskEditor({
                 edit('Dauer geändert', (t) => {
                   t.schedule.durationMin = Math.max(0, Math.round(value));
                   t.schedule.durationMax = Math.max(t.schedule.durationMax, t.schedule.durationMin);
-                  t.schedule.end = undefined;
                 }, `durmin-${task.id}`)
               }
             />
@@ -267,25 +283,10 @@ export function TaskEditor({
                 edit('Dauer geändert', (t) => {
                   t.schedule.durationMax = Math.max(0, Math.round(value));
                   t.schedule.durationMin = Math.min(t.schedule.durationMin, t.schedule.durationMax);
-                  t.schedule.end = undefined;
                 }, `durmax-${task.id}`)
               }
             />
           </Field>
-          </>
-          )}
-
-          {/*
-            Zwei Wege, ein Ergebnis - aber nie beide gleichzeitig sichtbar:
-            entweder grob (Beginn plus Dauer) oder taggenau (Start und Ende).
-            Beides nebeneinander zu zeigen hiess, zwei Eingaben anzubieten, die
-            sich gegenseitig ueberschreiben.
-          */}
-          {task.schedule.anchor === 'date' && (
-            <Button size="sm" variant="ghost" block onClick={() => setExactDates((v) => !v)}>
-              {exactDates ? '← Beginn und Dauer' : 'Taggenau eintragen →'}
-            </Button>
-          )}
 
           <div className="editor__section-title">Vorhaben</div>
           <select

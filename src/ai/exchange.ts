@@ -43,7 +43,7 @@ das Ergebnis zurück.
 7. Dauern (\`durationMin\`, \`durationMax\`) sind ganze Zahlen >= 0 in der Einheit
    \`durationUnit\`, und \`durationMax >= durationMin\`. Eine Dauer von \`0\`
    bedeutet "kein Enddatum" - die Aufgabe ist ein Dauerläufer.
-8. \`durationUnit\` ist \`days\` | \`weeks\` | \`months\` | \`quarters\` | \`years\`.
+8. \`durationUnit\` ist \`days\` | \`weeks\` | \`months\` | \`years\`.
    **Nur \`days\` zählt Arbeitstage (Mo-Fr); alles andere ist Kalenderzeit.**
    Eine Aufgabe über 5 \`years\` ab dem 01.01. endet am 31.12. des fünften Jahres.
 
@@ -65,10 +65,10 @@ das Ergebnis zurück.
       - \`anchor: "dependency"\` -> Start = spätestes Ende der \`dependsOn\` + 1 Arbeitstag.
       - \`durationMin\`/\`durationMax\` - Dauerspanne in \`durationUnit\`.
       - \`durationUnit\` - \`days\` (Arbeitstage) oder Kalenderzeit
-        (\`weeks\`/\`months\`/\`quarters\`/\`years\`).
-      - \`end\` - optionales festes Ende (nur bei \`anchor: "date"\`).
+        (\`weeks\`/\`months\`/\`years\`).
+      - Ein Enddatum wird nie gespeichert; es ergibt sich aus Beginn und Dauer.
       - Dauerläufer haben schlicht kein Enddatum: \`durationMin\` und
-        \`durationMax\` sind \`0\` und \`end\` fehlt (z.B. "Betrieb Infrastruktur X").
+        \`durationMax\` sind \`0\` (z.B. "Betrieb Infrastruktur X").
     - \`dependsOn[]\` - Vorgänger (Ende->Start).
     - \`parallelWith[]\` - diese Aufgaben müssen laufen, solange die Aufgabe läuft.
     - \`ventureConditions[]\` - Vorhaben, die abgeschlossen sein müssen (nur Warnung).

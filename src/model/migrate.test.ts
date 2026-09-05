@@ -207,6 +207,165 @@ describe('Migration', () => {
     expect(notes[1]).toMatchObject({ x: 0, y: 0 });
   });
 
+  it('rechnet ein festes Ende in die Dauer um, ohne den Termin zu verschieben', () => {
+    /*
+     * Schema 8: das Enddatum entfaellt. Entscheidend ist nicht, dass das Feld
+     * verschwindet, sondern dass die Aufgabe danach **exakt am selben Tag**
+     * endet - sonst verschoebe die Migration stillschweigend ganze Plaene.
+     *
+     * Der 05.01.2026 ist ein Montag, der 09.01.2026 der Freitag darauf: fuenf
+     * Arbeitstage. Die 99 Tage Dauer daneben hatte die alte Rechnung
+     * ignoriert, weil das feste Ende sie ueberschrieb.
+     */
+    const result = migrate({
+      schemaVersion: 7,
+      clients: [
+        {
+          id: 'c1',
+          name: 'X',
+          ventures: [{ id: 'v1', name: 'V' }],
+          tasks: [
+            {
+              id: 't1',
+              ventureId: 'v1',
+              title: 'Fest',
+              schedule: { anchor: 'date', start: '2026-01-05', end: '2026-01-09', durationMin: 99, durationMax: 99, durationUnit: 'days' },
+            },
+            {
+              // Ohne festes Ende bleibt die Dauerspanne, wie sie war.
+              id: 't2',
+              ventureId: 'v1',
+              title: 'Frei',
+              schedule: { anchor: 'date', start: '2026-01-05', durationMin: 2, durationMax: 8, durationUnit: 'weeks' },
+            },
+          ],
+        },
+      ],
+    });
+
+    const client = result.db.clients[0];
+    const fest = client.tasks[0].schedule as unknown as Record<string, unknown>;
+    expect(fest.end).toBeUndefined();
+    expect(fest).toMatchObject({ durationMin: 5, durationMax: 5, durationUnit: 'days' });
+
+    expect(client.tasks[1].schedule).toMatchObject({ durationMin: 2, durationMax: 8, durationUnit: 'weeks' });
+
+    // Die Probe aufs Exempel: dasselbe Ende wie vor der Migration.
+    const schedule = computeSchedule(client, 'max');
+    expect(schedule.byId.get('t1')!.end).toBe('2026-01-09');
+  });
+
+  it('zieht ein Ende am Wochenende auf den letzten Arbeitstag', () => {
+    /*
+     * Die einzige bekannte Abweichung der Migration 7 -> 8, hier festgehalten
+     * statt verschwiegen: ein festes Ende **am Wochenende** gibt es danach
+     * nicht mehr, weil sich das Ende aus Arbeitstagen ergibt. Der 14.11.2026
+     * ist ein Samstag; die Aufgabe endet danach am Freitag davor.
+     *
+     * Folgenlos bleibt das, weil an einem Samstag ohnehin nicht gearbeitet
+     * wird: die Zahl der Arbeitstage ist dieselbe, die Tageslasten sind
+     * dieselben, und ein Nachfolger startet in beiden Fällen am Montag
+     * (`nextWorkday` nach Freitag wie nach Samstag).
+     */
+    const result = migrate({
+      schemaVersion: 7,
+      clients: [
+        {
+          id: 'c1',
+          name: 'X',
+          ventures: [{ id: 'v1', name: 'V' }],
+          tasks: [
+            {
+              id: 't1',
+              ventureId: 'v1',
+              title: 'Bis Samstag',
+              schedule: { anchor: 'date', start: '2026-10-07', end: '2026-11-14', durationMin: 4, durationMax: 6, durationUnit: 'days' },
+            },
+            {
+              id: 't2',
+              ventureId: 'v1',
+              title: 'Danach',
+              dependsOn: ['t1'],
+              schedule: { anchor: 'dependency', durationMin: 1, durationMax: 1, durationUnit: 'days' },
+            },
+          ],
+        },
+      ],
+    });
+
+    const client = result.db.clients[0];
+    const schedule = computeSchedule(client, 'max');
+    const erste = schedule.byId.get('t1')!;
+    expect(erste.end).toBe('2026-11-13');
+    expect(erste.workdays).toBe(28);
+    // Der Nachfolger merkt davon nichts.
+    expect(schedule.byId.get('t2')!.start).toBe('2026-11-16');
+  });
+
+  it('rechnet Quartale in Monate um, ohne den Termin zu verschieben', () => {
+    /*
+     * Schema 9: die Einheit "Quartale" entfällt, weil sie exakt drei Monate
+     * war. Geprüft wird beides - die umgerechnete Angabe und das Ende, das
+     * daraus folgt: 2 Quartale ab dem 01.01. enden am 30.06., 6 Monate auch.
+     */
+    const result = migrate({
+      schemaVersion: 8,
+      clients: [
+        {
+          id: 'c1',
+          name: 'X',
+          ventures: [{ id: 'v1', name: 'V' }],
+          tasks: [
+            {
+              id: 't1',
+              ventureId: 'v1',
+              title: 'Quartalsweise',
+              schedule: { anchor: 'date', start: '2026-01-01', durationMin: 2, durationMax: 3, durationUnit: 'quarters' },
+            },
+          ],
+        },
+      ],
+    });
+
+    const client = result.db.clients[0];
+    expect(client.tasks[0].schedule).toMatchObject({ durationMin: 6, durationMax: 9, durationUnit: 'months' });
+    expect(computeSchedule(client, 'min').byId.get('t1')!.end).toBe('2026-06-30');
+    expect(computeSchedule(client, 'max').byId.get('t1')!.end).toBe('2026-09-30');
+  });
+
+  it('repariert Quartale auch ohne Migrationsschritt', () => {
+    /*
+     * Ein LLM (oder eine von Hand bearbeitete Datei) kann die aktuelle
+     * Schemaversion tragen und trotzdem "quarters" enthalten. Ohne die
+     * Reparatur in `normalizeDatabase` fiele die Einheit auf Arbeitstage
+     * zurück - aus zwei Quartalen würden zwei Tage.
+     */
+    const result = migrate({
+      schemaVersion: CURRENT_SCHEMA_VERSION,
+      clients: [
+        {
+          id: 'c1',
+          name: 'X',
+          ventures: [{ id: 'v1', name: 'V' }],
+          tasks: [
+            {
+              id: 't1',
+              ventureId: 'v1',
+              title: 'Aus dem Modell zurück',
+              schedule: { anchor: 'date', start: '2026-01-01', durationMin: 2, durationMax: 2, durationUnit: 'quarters' },
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(result.db.clients[0].tasks[0].schedule).toMatchObject({
+      durationMin: 6,
+      durationMax: 6,
+      durationUnit: 'months',
+    });
+  });
+
   it('leitet den Vorhabenstatus aus den Aufgaben ab', () => {
     const client = createDemoClient();
     const betrieb = client.ventures[1];

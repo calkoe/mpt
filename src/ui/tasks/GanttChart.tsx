@@ -323,7 +323,7 @@ export function GanttChart({
             `Start: ${movable ? 'festes Datum (ziehbar)' : 'ergibt sich aus den Vorgängern'}`,
             st.openEnded
               ? 'Ende: keines'
-              : `Ende: ${row.task.schedule.end ? 'fest gesetzt' : 'ergibt sich aus der Dauer'}`,
+              : 'Ende: ergibt sich aus der Dauer',
             progress ? `Checkliste: ${progress.done} von ${progress.total} erledigt` : '',
             ...rowWarnings.map((w) => `! ${w.text}`),
           ]
@@ -391,7 +391,7 @@ export function GanttChart({
               {/* Ankersymbole: woher kommen Start und Ende? */}
               <AnchorMark x={barX} y={y + ROW_HEIGHT / 2 - 2} fixed={movable} side="start" />
               {!st.openEnded && (
-                <AnchorMark x={barEnd} y={y + ROW_HEIGHT / 2 - 2} fixed={Boolean(row.task.schedule.end)} side="end" />
+                <AnchorMark x={barEnd} y={y + ROW_HEIGHT / 2 - 2} side="end" />
               )}
 
               {/* Meilenstein-Raute am Enddatum */}
@@ -555,8 +555,11 @@ export function GanttChart({
  * Kleines Symbol an einem Balkenende.
  *  - `fixed`: gefüllte Raute - der Termin steht fest (Datum eingetragen).
  *  - sonst  : offener Winkel - der Termin ergibt sich aus Vorgängern bzw. Dauer.
+ *
+ * Am Ende ist er nie fest: ein Enddatum wird nicht mehr gespeichert, es folgt
+ * immer aus der Dauer.
  */
-function AnchorMark({ x, y, fixed, side }: { x: number; y: number; fixed: boolean; side: 'start' | 'end' }) {
+function AnchorMark({ x, y, fixed = false, side }: { x: number; y: number; fixed?: boolean; side: 'start' | 'end' }) {
   if (fixed) {
     return (
       <rect className="gantt__anchor gantt__anchor--fixed" x={x - 3} y={y - 3} width={6} height={6} transform={`rotate(45 ${x} ${y})`}>
@@ -594,14 +597,14 @@ function useBarDrag({
   commitClient: ReturnType<typeof useStore>['commitClient'];
 }) {
   const [state, setState] = useState<{ taskId: Id; pixels: number } | null>(null);
-  const origin = useRef<{ x: number; start: string; end?: string; applied: number } | null>(null);
+  const origin = useRef<{ x: number; start: string; applied: number } | null>(null);
 
   const start = (event: React.PointerEvent<SVGRectElement>, task: Task) => {
     if (!task.schedule.start) return;
     event.stopPropagation();
     event.preventDefault();
     (event.target as Element).setPointerCapture(event.pointerId);
-    origin.current = { x: event.clientX, start: task.schedule.start, end: task.schedule.end, applied: 0 };
+    origin.current = { x: event.clientX, start: task.schedule.start, applied: 0 };
     setState({ taskId: task.id, pixels: 0 });
 
     const move = (e: PointerEvent) => {
@@ -627,9 +630,8 @@ function useBarDrag({
         (c) => {
           const target = c.tasks.find((t) => t.id === task.id);
           if (!target) return;
+          // Die Dauer bleibt; das Ende ergibt sich daraus neu.
           target.schedule.start = nextWorkday(addDays(base.start, days));
-          // Ein fest gesetztes Ende wandert mit, damit die Dauer erhalten bleibt.
-          if (base.end) target.schedule.end = addDays(base.end, days);
         },
         { coalesceKey: `gantt-drag-${task.id}`, checkpoint: false },
       );

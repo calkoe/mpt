@@ -861,32 +861,51 @@ export function Chip({
   title?: string;
 }) {
   const className = `chip${onClick ? ' chip--button' : ''}${active ? ' chip--active' : ''}`;
-  const content = (
+  const body = (
     <>
       {color && <span className="chip__dot" style={{ background: color }} />}
       <span className="truncate">{label}</span>
-      {onRemove && (
-        <button
-          type="button"
-          className="chip__x"
-          aria-label="Entfernen"
-          onClick={(e) => {
-            e.stopPropagation();
-            onRemove();
-          }}
-        >
-          &times;
-        </button>
-      )}
     </>
   );
+  const remove = onRemove && (
+    <button
+      type="button"
+      className="chip__x"
+      aria-label="Entfernen"
+      onClick={(e) => {
+        e.stopPropagation();
+        onRemove();
+      }}
+    >
+      &times;
+    </button>
+  );
+
+  /*
+   * Anklickbar **und** entfernbar: dann sind es zwei Knöpfe nebeneinander im
+   * selben Rahmen, nicht einer im anderen. Ein `<button>` im `<button>` ist
+   * ungültiges HTML - der Browser zieht den inneren beim Parsen heraus, und
+   * dann hängt das Kreuz plötzlich neben dem Chip statt darin.
+   */
+  if (onClick && onRemove) {
+    return (
+      <span className={className} title={title}>
+        <button type="button" className="chip__label" onClick={onClick}>
+          {body}
+        </button>
+        {remove}
+      </span>
+    );
+  }
+
   return onClick ? (
     <button type="button" className={className} onClick={onClick} title={title}>
-      {content}
+      {body}
     </button>
   ) : (
     <span className={className} title={title}>
-      {content}
+      {body}
+      {remove}
     </span>
   );
 }

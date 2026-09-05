@@ -18,7 +18,7 @@ import type { PersonUnit } from "../engine/resources";
 export type ThemeSetting = "system" | "light" | "dark";
 export type TaskView = "network" | "gantt";
 export type ResourceView = "chart" | "table";
-export type Weighting = "none" | "duration" | "cost" | "people";
+export type Weighting = "none" | "duration" | "cost";
 /**
  * Welche der drei Geldgrössen die Tabelle zeigt. Sie dürfen nie verwechselt
  * werden: `approved` ist die Obergrenze, `planned` die Absicht, `actual` das
@@ -31,8 +31,6 @@ export interface Preferences {
   taskView: TaskView;
   resourceView: ResourceView;
   scenario: Scenario;
-  /** Tiefengrad der angezeigten Abhängigkeiten; 99 = alle. */
-  depth: number;
   ganttGranularity: Granularity;
   resourceGranularity: Granularity;
   personUnit: PersonUnit;
@@ -59,11 +57,10 @@ const DEFAULTS: Preferences = {
   taskView: "network",
   resourceView: "chart",
   scenario: "max",
-  depth: 99,
   ganttGranularity: "week",
   resourceGranularity: "month",
   personUnit: "FTE",
-  weighting: "none",
+  weighting: "duration",
   showCriticalPath: false,
   showResourceRail: true,
   splitRatio: 0.55,

@@ -351,8 +351,30 @@ h1, h2, h3, h4 {
 .venture__toggle:hover { color: var(--text); background: var(--surface-3); }
 .venture__toggle--open { transform: rotate(180deg); color: var(--text); }
 
-.venture__bar { height: 3px; border-radius: var(--r-full); background: var(--surface-3); margin-top: var(--sp-2); overflow: hidden; }
-.venture__bar > i { display: block; height: 100%; background: var(--ok); }
+/*
+ * Fortschrittsbalken. War frueher der Balken am Vorhaben; der ist entfallen,
+ * die Form nicht - sie zeigt jetzt den Fortschritt einer Aufgabe in
+ * "Wer arbeitet woran?".
+ */
+.progress {
+  flex: 1 1 auto;
+  min-width: 40px;
+  height: 4px;
+  border-radius: var(--r-full);
+  background: var(--surface-3);
+  overflow: hidden;
+}
+.progress > i { display: block; height: 100%; background: var(--status-active); border-radius: inherit; }
+
+.progress-row { display: flex; align-items: center; gap: var(--sp-2); margin-top: 5px; }
+.progress-row__label {
+  flex: none;
+  /* Feste Breite, damit die Balken untereinander an derselben Stelle enden. */
+  min-width: 38px;
+  text-align: right;
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}
 
 /* -------------------------------------------------- 5. Panels */
 .main {
@@ -682,6 +704,22 @@ h1, h2, h3, h4 {
 
 /* Zwei gleich breite Felder nebeneinander - Beschriftungen und Eingaben
    liegen dadurch exakt auf einer Linie. */
+/*
+ * Umschalter in einer Feldueberschrift (Field `action`): er gehoert zur
+ * Beschriftung, nicht zum Feld darunter - deshalb ist er so zurueckgenommen
+ * wie sie und wird erst beim Ueberfahren deutlich. Ohne das saesse ein
+ * vollwertiger Knopf neben einer grauen Kleinschrift und zoege den Blick auf
+ * sich, obwohl er nur eine Nebensache umstellt.
+ */
+.field__label .btn {
+  color: var(--text-muted);
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 500;
+}
+
+.field__label .btn:hover:not(:disabled) { color: var(--text); }
+
 .field-pair {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -839,6 +877,22 @@ h1, h2, h3, h4 {
 }
 
 .chip__dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+
+/* Klickbarer Teil eines Chips, der zugleich ein Entfernen-Kreuz traegt - siehe
+   Chip in controls.tsx. Er sieht nicht wie ein Knopf aus, ist aber einer. */
+.chip__label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  min-width: 0;
+  max-width: 100%;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  padding: 0;
+  cursor: pointer;
+}
 .chip__x {
   border: none;
   background: transparent;
@@ -1273,6 +1327,16 @@ h1, h2, h3, h4 {
 .breakdown td { text-align: left; }
 .breakdown .table__num { text-align: right; }
 .breakdown thead th { background: var(--surface-2); }
+
+/*
+ * Kopfzeile durchgehend einfarbig - auch die Zeichen. Die drei Groessen
+ * unterscheiden sich durch ihre Form (Quadrat, hohler Kreis, gefuellter
+ * Kreis), nicht durch die Farbe; verschieden eingefaerbt wirkte die Zeile
+ * unruhig, ohne etwas hinzuzufuegen.
+ */
+.breakdown thead th,
+.breakdown thead .measure,
+.breakdown thead .measure__mark { color: var(--text-muted); }
 .breakdown tfoot td {
   font-weight: 600;
   border-top: 1px solid var(--border-strong);
@@ -1432,6 +1496,29 @@ h1, h2, h3, h4 {
 }
 
 .workload__head { display: flex; align-items: center; gap: var(--sp-3); }
+
+/*
+ * Wartende Aufgabe: der Balken tritt zurueck. Nur die Farbe waere zu wenig -
+ * den Zustand nennt ausserdem der Punkt vor dem Titel samt Beschriftung.
+ */
+.workload__bar--waiting { opacity: 0.7; }
+/* Neutraler Balken statt der Farbe fuer "in Arbeit". `display` bleibt
+   unangetastet - die Klasse sitzt auf der Flex-Zeile selbst. */
+.workload__bar--waiting .progress > i { background: var(--text-faint); }
+
+/*
+ * Ueberfaellig: laut Plan haette die Aufgabe fertig sein muessen. Steht nach
+ * der Regel oben, damit die Warnfarbe auch eine wartende Aufgabe uebermalt -
+ * das ist dann die wichtigere Aussage.
+ */
+.progress-row--overdue { opacity: 1; }
+.progress-row--overdue .progress > i { background: var(--warn); }
+.progress-row--overdue .progress-row__label { color: var(--warn); }
+
+/* Die Zeilen tragen jetzt Titel und Balken untereinander. Der Punkt fuer den
+   Zustand bleibt dabei oben auf Hoehe des Titels. */
+.workload .list__item { align-items: flex-start; }
+.workload .list__item > .status-dot { margin-top: 6px; }
 
 /* Gesamtsummen unter einer Liste */
 .totals {
@@ -1607,6 +1694,21 @@ h1, h2, h3, h4 {
 .table tbody tr:hover td:first-child { background: var(--surface-2); }
 .table__sum td { font-weight: 650; background: var(--surface-2); }
 .table__sum td:first-child { background: var(--surface-2); }
+
+/*
+ * Die Auswertung nutzt `.table` fuer Raster und Raender, aber **nicht** deren
+ * mitgefuehrte erste Spalte: sie scrollt nicht waagerecht. Die eigene
+ * Flaechenfarbe der Spalte liess die Kopfzeile sonst zweifarbig aussehen -
+ * "Ressource" dunkler als der Rest. Steht bewusst hier unten, nach den
+ * `.table`-Regeln: bei gleicher Spezifitaet entscheidet die Reihenfolge.
+ */
+.breakdown th:first-child,
+.breakdown td:first-child { position: static; z-index: auto; background: none; }
+/* Genauer als die Zeile darueber, sonst bliebe die erste Kopfzelle durchsichtig. */
+.breakdown thead th,
+.breakdown thead th:first-child { background: var(--surface-2); }
+.breakdown tbody tr:hover td:first-child { background: none; }
+.breakdown__row--clickable:hover td { background: var(--surface-3); }
 .table__breach { color: var(--critical); font-weight: 650; }
 
 /* Listen */

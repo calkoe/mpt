@@ -35,7 +35,7 @@ import {
   type LayoutNode,
 } from '../../engine/layout';
 import { formatDateDe } from '../../engine/dates';
-import { formatDuration, wouldCreateCycle, type ScheduleResult } from '../../engine/schedule';
+import { formatDuration, taskProgress, wouldCreateCycle, type ScheduleResult } from '../../engine/schedule';
 import type { Warning } from '../../engine/validate';
 import { createFollowUp, createNote, createPredecessor } from '../../model/factory';
 import { usePreferences } from '../../state/preferences';
@@ -161,19 +161,26 @@ export function NetworkChart({
     setHoveredTask(null);
   };
 
-  /** Gewichtung: Balken am Knoten variiert nach gewählter Kennzahl. */
-  const weightOf = (task: Task): number => {
-    const st = schedule.byId.get(task.id);
-    switch (prefs.weighting) {
-      case 'duration':
-        return st?.duration ?? 1;
-      case 'cost':
-        return task.costs.reduce((s, c) => s + Math.abs(c.amount), 0);
-      case 'people':
-        return task.assignments.reduce((s, a) => s + (a.mode === 'FTE' ? a.value * 20 : a.value), 0);
-      default:
-        return 0;
-    }
+  /**
+   * Kennzahl fuer die **relative** Gewichtung (Kosten): der Balken zeigt den
+   * Anteil an der teuersten Aufgabe. Die Zeitgewichtung geht einen anderen Weg
+   * - siehe `ratioOf`.
+   */
+  const weightOf = (task: Task): number =>
+    prefs.weighting === 'cost' ? task.costs.reduce((s, c) => s + Math.abs(c.amount), 0) : 0;
+
+  /**
+   * Fuellstand des Balkens am Knoten, 0..1.
+   *
+   * Bei "Zeit" ist es der Fortschritt im geplanten Zeitraum - eine Zahl, die
+   * fuer sich steht und keinen Vergleich mit anderen Aufgaben braucht. Bei
+   * "Kosten" dagegen der Anteil an der teuersten Aufgabe; dort sagt ein
+   * absoluter Betrag ohne Bezug nichts.
+   */
+  const ratioOf = (task: Task): number => {
+    if (prefs.weighting === 'none') return 0;
+    if (prefs.weighting === 'duration') return taskProgress(task, schedule.byId.get(task.id));
+    return weightOf(task) / maxWeight;
   };
 
   /** Wie viel der geplanten Kosten einer Aufgabe ist bereits abgerufen? */
@@ -406,7 +413,8 @@ export function NetworkChart({
               showCritical={prefs.showCriticalPath}
               warnings={warnings.get(node.id) ?? []}
               tags={node.task.tagIds.map((id) => tagById.get(id)).filter((t): t is NonNullable<typeof t> => Boolean(t))}
-              weightRatio={prefs.weighting === 'none' ? 0 : weightOf(node.task) / maxWeight}
+              weightRatio={ratioOf(node.task)}
+              withTrack={prefs.weighting === 'duration'}
               costProgress={prefs.weighting === 'cost' ? costProgressOf(node.task) : null}
               /* Die "+"-Knöpfe stören im Auswahlmodus nur. */
               showAdders={hoveredTask === node.id && !pick}
@@ -662,6 +670,7 @@ function NodeView({
   warnings,
   tags,
   weightRatio,
+  withTrack,
   costProgress,
   showAdders,
   onHover,
@@ -680,6 +689,8 @@ function NodeView({
   /** Tags der Aufgabe - als kleine Marken am unteren Rand. */
   tags: { id: Id; name: string; color: string }[];
   weightRatio: number;
+  /** Leere Spur hinter dem Balken - nur beim Fortschritt sinnvoll. */
+  withTrack: boolean;
   /**
    * Anteil der bereits abgerufenen Kosten (0..1) - nur bei Gewichtung nach
    * Kosten belegt, sonst `null`.
@@ -757,11 +768,24 @@ function NodeView({
         <rect className="node__accent" x={0} y={0} width={4} height={node.height} fill={statusColor} />
 
         {/*
-          Gewichtungsbalken ganz unten am Rand. Bei der Gewichtung nach Kosten
-          zeigt der gefuellte Teil zusaetzlich, wie viel davon bereits
-          abgerufen ist - dieselbe Aussage wie im Kosten-Editor, nur als Bild.
+          Balken ganz unten am Rand. Bei "Zeit" ist er ein Fortschrittsbalken
+          mit leerer Spur - ohne sie saehe "noch nicht begonnen" aus wie
+          "Balken abgeschaltet". Bei "Kosten" zeigt der gefuellte Teil
+          zusaetzlich, wie viel davon bereits abgerufen ist - dieselbe Aussage
+          wie im Kosten-Editor, nur als Bild.
         */}
-        {weightRatio > 0 && (
+        {withTrack && (
+          <rect
+            x={8}
+            y={node.height - 4}
+            width={node.width - 16}
+            height={3}
+            rx={1.5}
+            fill="var(--border-strong)"
+            opacity={0.4}
+          />
+        )}
+        {(weightRatio > 0 || withTrack) && (
           <>
             <rect
               x={8}

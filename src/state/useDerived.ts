@@ -5,7 +5,7 @@
  */
 import { useMemo } from 'react';
 import type { Client, Id, Task } from '../model/types';
-import { collectNeighbourhood, computeSchedule, type ScheduleResult } from '../engine/schedule';
+import { computeSchedule, type ScheduleResult } from '../engine/schedule';
 import { resourceWarnings, taskWarnings, type Warning } from '../engine/validate';
 import { usePreferences } from './preferences';
 import { useStore } from './store';
@@ -17,7 +17,7 @@ export interface Derived {
   resourceWarnings: Map<Id, Warning[]>;
   /** Aufgaben des aktiven Vorhabens (oder alle, wenn keins gewählt ist). */
   ventureTasks: Task[];
-  /** Sichtbare Aufgaben nach Vorhaben- und Tiefengrad-Filter. */
+  /** Sichtbare Aufgaben nach Vorhaben- und Tag-Filter. */
   visibleTasks: Task[];
   taskById: Map<Id, Task>;
 }
@@ -37,15 +37,12 @@ export function useDerived(): Derived {
     return byVenture.filter((t) => t.tagIds.some((id) => ui.tagFilter.includes(id)));
   }, [client.tasks, ui.ventureId, ui.tagFilter]);
 
-  const visibleTasks = useMemo(() => {
-    // Ohne Auswahl oder bei vollem Tiefengrad: alle Aufgaben des Vorhabens.
-    if (prefs.depth >= 99 || !ui.selectedTaskId) return ventureTasks;
-    const reachable = collectNeighbourhood(client.tasks, ui.selectedTaskId, prefs.depth);
-    const filtered = ventureTasks.filter((t) => reachable.has(t.id));
-    // Vorhaben-übergreifende Nachbarn ergänzen, damit der Graph nicht reißt.
-    const extra = client.tasks.filter((t) => reachable.has(t.id) && !filtered.includes(t));
-    return [...filtered, ...extra];
-  }, [client.tasks, prefs.depth, ui.selectedTaskId, ventureTasks]);
+  /*
+   * Sichtbar ist, was der Vorhaben- und der Tag-Filter übrig lassen. Einen
+   * Tiefengrad-Filter um die gewählte Aufgabe gab es früher zusätzlich; er
+   * wurde mit seinem Schieber entfernt.
+   */
+  const visibleTasks = ventureTasks;
 
   const taskById = useMemo(() => new Map(client.tasks.map((t) => [t.id, t])), [client.tasks]);
 

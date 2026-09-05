@@ -27,7 +27,7 @@ import {
   personSeries,
 } from './resources';
 import { resourceWarnings, taskWarnings } from './validate';
-import { createBudget, createClient, createPerson, createTask, createVenture } from '../model/factory';
+import { createBudget, createClient, createDemoClient, createPerson, createTask, createVenture } from '../model/factory';
 import type { Client, Task } from '../model/types';
 
 // Montag, 5. Januar 2026
@@ -124,15 +124,6 @@ describe('Terminierung', () => {
     expect(computeSchedule(client, 'min').ordered[0].endPessimistic).toBe('2026-01-13');
   });
 
-  it('leitet die Dauer aus einem festen Ende ab', () => {
-    const { client, venture } = buildClient();
-    addTask(client, venture, {
-      title: 'A',
-      schedule: { anchor: 'date', start: MON, end: '2026-01-09', durationMin: 99, durationMax: 99, durationUnit: 'days' },
-    });
-    expect(computeSchedule(client, 'max').ordered[0].duration).toBe(5);
-  });
-
   it('markiert den kritischen Pfad und weist Puffer aus', () => {
     const { client, venture } = buildClient();
     const start = addTask(client, venture, { title: 'Start', schedule: { anchor: 'date', start: MON, durationMin: 2, durationMax: 2, durationUnit: 'days' } });
@@ -157,6 +148,77 @@ describe('Terminierung', () => {
     expect(schedule.byId.get(lang.id)!.slack).toBe(0);
     expect(schedule.byId.get(kurz.id)!.critical).toBe(false);
     expect(schedule.byId.get(kurz.id)!.slack).toBe(8);
+  });
+
+  it('misst den Puffer am Ende des gerechneten Szenarios', () => {
+    /*
+     * Im optimistischen Szenario muss der kritische Pfad kritisch bleiben.
+     *
+     * Gemessen wurde einmal gegen das **pessimistische** Projektende: dann
+     * endete im optimistischen Fall jede Kette vor diesem Ende, jede Aufgabe
+     * bekam denselben Puffer und der kritische Pfad war verschwunden. Der
+     * ausgewiesene Puffer war in Wahrheit die Dauerunschärfe der längsten
+     * Kette - im Beispielmandanten 66 AT auf jeder einzelnen Aufgabe.
+     */
+    const { client, venture } = buildClient();
+    const a = addTask(client, venture, {
+      title: 'A',
+      schedule: { anchor: 'date', start: MON, durationMin: 5, durationMax: 20, durationUnit: 'days' },
+    });
+    const b = addTask(client, venture, {
+      title: 'B',
+      dependsOn: [a.id],
+      schedule: { anchor: 'dependency', durationMin: 5, durationMax: 20, durationUnit: 'days' },
+    });
+    // Kurze Nebenaufgabe ohne Nachfolger - sie hat echten Puffer.
+    const neben = addTask(client, venture, {
+      title: 'Neben',
+      dependsOn: [a.id],
+      schedule: { anchor: 'dependency', durationMin: 1, durationMax: 1, durationUnit: 'days' },
+    });
+
+    for (const scenario of ['min', 'max'] as const) {
+      const schedule = computeSchedule(client, scenario);
+      expect(`${scenario}: A kritisch=${schedule.byId.get(a.id)!.critical}`).toBe(`${scenario}: A kritisch=true`);
+      expect(schedule.byId.get(b.id)!.slack).toBe(0);
+      expect(schedule.byId.get(neben.id)!.slack).toBeGreaterThan(0);
+    }
+
+    // Die Achse reicht weiterhin bis zum pessimistischen Ende der letzten
+    // Aufgabe - dort ist der Plan in jedem Fall vorbei, auch wenn optimistisch
+    // gerechnet wird. Nur der Puffer misst sich nicht mehr daran.
+    const optimistisch = computeSchedule(client, 'min');
+    const letzte = optimistisch.byId.get(b.id)!;
+    expect(optimistisch.projectEnd).toBe(letzte.endPessimistic);
+    expect(diffDays(letzte.end, optimistisch.projectEnd)).toBeGreaterThan(0);
+  });
+
+  it('hat in jedem Szenario einen kritischen Pfad', () => {
+    /*
+     * Der Grund für diesen Test: der optimistische Fall war praktisch
+     * ungeprüft. Von 46 Aufrufen von `computeSchedule` in den Tests rechneten
+     * 44 pessimistisch, und die beiden übrigen sahen sich nur eine Dauer an -
+     * nie Puffer oder kritischen Pfad. Dadurch blieb monatelang unbemerkt,
+     * dass optimistisch **jede** Aufgabe Puffer auswies und der kritische Pfad
+     * ganz fehlte.
+     *
+     * Geprüft wird deshalb am Beispielmandanten die Eigenschaft, die in jedem
+     * Szenario gelten muss: irgendetwas bestimmt das Projektende, und was das
+     * Projektende bestimmt, hat keinen Puffer.
+     */
+    const client = createDemoClient();
+    for (const scenario of ['min', 'max'] as const) {
+      const schedule = computeSchedule(client, scenario);
+      const endlich = schedule.ordered.filter((st) => !st.openEnded);
+      // diffDays(a, b) ist b - a: positiv heisst, b liegt später.
+      const spaetestes = endlich.reduce((a, b) => (diffDays(a.end, b.end) > 0 ? b : a));
+      expect(`${scenario}: ${spaetestes.task.title} Puffer ${spaetestes.slack}`).toBe(
+        `${scenario}: Zweiter Standort Puffer 0`,
+      );
+      expect(endlich.some((st) => st.critical)).toBe(true);
+      // Und nicht alles ist kritisch - sonst wäre die Aussage wertlos.
+      expect(endlich.some((st) => st.slack > 0)).toBe(true);
+    }
   });
 
   it('weist über ein Wochenende hinweg keinen Scheinpuffer aus', () => {
@@ -209,7 +271,7 @@ describe('Terminierung', () => {
     // des fuenften Jahres - kein Abzug von Wochenenden.
     expect(addDuration('2026-01-01', 5, 'years')).toBe('2030-12-31');
     expect(addDuration('2026-01-01', 1, 'months')).toBe('2026-01-31');
-    expect(addDuration('2026-01-01', 1, 'quarters')).toBe('2026-03-31');
+    expect(addDuration('2026-01-01', 3, 'months')).toBe('2026-03-31');
     expect(addDuration('2026-01-05', 1, 'weeks')).toBe('2026-01-11');
     // Arbeitstage zaehlen weiterhin Mo-Fr: Montag + 5 AT endet am Freitag.
     expect(addDuration('2026-01-05', 5, 'days')).toBe('2026-01-09');
@@ -652,10 +714,9 @@ describe('Wiederkehrende Kosten', () => {
       schedule: {
         anchor: 'date',
         start: '2026-01-01',
-        end: '2026-06-30',
-        durationMin: 1,
-        durationMax: 1,
-        durationUnit: 'days',
+        durationMin: 6,
+        durationMax: 6,
+        durationUnit: 'months',
       },
     });
     const budget = budgetWith(task, client, {});
@@ -675,10 +736,9 @@ describe('Wiederkehrende Kosten', () => {
       schedule: {
         anchor: 'date',
         start: '2026-02-10',
-        end: '2026-09-30',
-        durationMin: 1,
-        durationMax: 1,
-        durationUnit: 'days',
+        durationMin: 7,
+        durationMax: 7,
+        durationUnit: 'months',
       },
     });
     const budget = budgetWith(task, client, {});

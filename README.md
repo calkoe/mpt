@@ -134,7 +134,7 @@ in der Kopfzeile erneut öffnen.
    in genau diese Datei – der Status oben zeigt jederzeit, ob alles geschrieben wurde.
 2. Links ein **Vorhaben** anlegen. Vorhaben bündeln Aufgaben; das Dropdown darüber trennt **Mandanten**
    als vollständig unabhängige Datenräume.
-3. **+ Aufgabe** anlegen. Start, Ende und Dauer sind ineinander umrechenbar – eines eingeben genügt.
+3. **+ Aufgabe** anlegen. Beginn (grob im Raster oder taggenau) plus Dauer – das Ende ergibt sich daraus.
    Eine Dauer von **0** heißt: kein Enddatum, die Aufgabe läuft dauerhaft weiter.
 4. Zum **Verketten** im Netzplan über eine Aufgabe fahren und auf das grüne **+** an ihrer linken
    oder rechten Kante klicken – links entsteht ein Vorgänger, rechts eine Folgeaufgabe.

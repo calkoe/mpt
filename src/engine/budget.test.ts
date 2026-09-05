@@ -17,6 +17,7 @@ import { describe, expect, it } from 'vitest';
 import type { Budget, Client, CostItem, Task, Venture } from '../model/types';
 import { createBudget, createClient, createTask, createVenture } from '../model/factory';
 import { computeSchedule } from './schedule';
+import { nextWorkday, workdaysBetween } from './dates';
 import {
   breakdownOfPoint,
   buildBreakdown,
@@ -49,7 +50,12 @@ function cost(patch: Partial<CostItem> & { budgetId: string }): CostItem {
   };
 }
 
-/** Mandant mit einem Budget und einer Aufgabe fester Laufzeit. */
+/**
+ * Mandant mit einem Budget und einer Aufgabe fester Laufzeit.
+ *
+ * `end` ist hier nur eine bequeme Schreibweise für die Laufzeit - gespeichert
+ * wird ausschliesslich die Dauer, das Modell kennt kein Enddatum mehr.
+ */
 function setup(options: {
   start?: string;
   end?: string;
@@ -63,13 +69,14 @@ function setup(options: {
   const budget = { ...createBudget('B'), ...options.budget };
   client.budgets = [budget];
 
-  const task = createTask(venture.id, 'A', options.start ?? JAN_1);
+  const start = options.start ?? JAN_1;
+  const task = createTask(venture.id, 'A', start);
+  const dauer = options.end ? workdaysBetween(nextWorkday(start), options.end) : 5;
   task.schedule = {
     anchor: 'date',
-    start: options.start ?? JAN_1,
-    end: options.end,
-    durationMin: 5,
-    durationMax: 5,
+    start,
+    durationMin: dauer,
+    durationMax: dauer,
     durationUnit: 'days',
   };
   task.costs = (options.costs ?? []).map((c) => ({ ...c, budgetId: budget.id }));
@@ -371,7 +378,8 @@ describe('Gesamtbudget', () => {
     client.budgets = [a, b];
 
     const task = createTask(venture.id, 'A', JAN_1);
-    task.schedule = { anchor: 'date', start: JAN_1, end: '2026-12-31', durationMin: 5, durationMax: 5, durationUnit: 'days' };
+    const dauer = workdaysBetween(JAN_1, '2026-12-31');
+    task.schedule = { anchor: 'date', start: JAN_1, durationMin: dauer, durationMax: dauer, durationUnit: 'days' };
     task.costs = [
       cost({ budgetId: a.id, amount: 1000, actualAmount: 500 }),
       cost({ budgetId: b.id, amount: 300, actualAmount: 100 }),

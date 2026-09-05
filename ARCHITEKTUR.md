@@ -58,7 +58,7 @@ Deshalb ist die gesamte Fachlogik ohne DOM testbar – und genau dort liegen die
 | Datei          | Inhalt                                                                                                                                                                                 |
 | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `dates.ts`     | Arbeitstags-Mathematik (Mo–Fr), **Kalenderdauern** (`addDuration`/`subDuration`), Rastergrenzen (`periodStartOf`/`periodEndOf`), Bucket-Bildung, deutsche Formatierung. Rechnet intern in UTC, um Sommerzeit zu umgehen. |
-| `schedule.ts`  | `computeSchedule()`: topologische Sortierung → Vorwärtsrechnung → Rückwärtsrechnung → kritischer Pfad. Außerdem `wouldCreateCycle()` und `collectNeighbourhood()` (Tiefengrad-Filter). |
+| `schedule.ts`  | `computeSchedule()`: topologische Sortierung → Vorwärtsrechnung → Rückwärtsrechnung → kritischer Pfad. Außerdem `wouldCreateCycle()` und `collectNeighbourhood()` (Nachbarschaft eines Knotens; derzeit ohne Aufrufer, siehe unten). |
 | `resources.ts` | Tageslasten je Person/Budget, Aggregation in Buckets, Grenzwerte (`budgetCeiling`), Jahressummen, Gesamtsichten (`totalBudgetOf`/`totalPersonOf`).                                     |
 | `validate.ts`  | Alle Warnungen (Parallelität, Bedingungen, Status gegen Termin, Auslastung, Abrechnungsraster, Zyklen) und `utilisationState()`.                                                       |
 | `layout.ts`    | Netzplan-Layout (Ebenen nach Tiefe, Baryzentrum gegen Kantenkreuzungen) und Kurvenpfade.                                                                                               |
@@ -68,7 +68,7 @@ Deshalb ist die gesamte Fachlogik ohne DOM testbar – und genau dort liegen die
 - `anchor: 'date'` → Start ist gesetzt. `anchor: 'dependency'` → Start = spätestes Vorgängerende + 1 Arbeitstag.
 - Dauer ist eine Spanne (`durationMin`/`durationMax`) **in der Einheit `durationUnit`**; das Szenario
   (`'min'`/`'max'`) wählt den Rechenwert.
-- **Nur `days` zählt Arbeitstage. Wochen, Monate, Quartale und Jahre sind Kalenderzeit** – eine
+- **Nur `days` zählt Arbeitstage. Wochen, Monate und Jahre sind Kalenderzeit** – eine
   Aufgabe über fünf Jahre ab dem 01.01. endet am 31.12. des fünften Jahres. Gerechnet wird
   ausschließlich über `addDuration()`/`subDuration()` in `dates.ts`; eine Umrechnung in Arbeitstage
   (252 je Jahr) verschöbe das Ende um Monate und ist deshalb nirgends erlaubt.
@@ -77,8 +77,11 @@ Deshalb ist die gesamte Fachlogik ohne DOM testbar – und genau dort liegen die
   Codestelle mal als erledigt und mal nicht.
 - **Ob ein Vorhaben abgeschlossen ist, wird abgeleitet** (`isVentureDone()` in `engine/validate.ts`):
   alle Aufgaben erledigt oder im Betrieb. Es gibt dafür kein gespeichertes Feld.
-- Ein explizites `end` überschreibt die Dauer (nur bei festem Start).
-- **Dauerläufer haben schlicht kein Enddatum**: `durationMax === 0` und kein `end`. Es gibt dafür kein
+- **Ein Enddatum wird nie gespeichert.** Es ergibt sich immer aus Beginn und Dauer. Bis Schema 7 gab
+  es ein optionales festes `end`, das die Dauer überschrieb – damit lagen zwei Angaben für dieselbe
+  Sache vor, und der Dauerregler lief bei so einer Aufgabe ins Leere. Wer taggenau terminieren will,
+  gibt den Beginn taggenau ein und die Dauer in Arbeitstagen.
+- **Dauerläufer haben schlicht kein Enddatum**: `durationMax === 0`. Es gibt dafür kein
   eigenes Kennzeichen im Schema – `isOpenEnded(schedule)` in `model/types.ts` ist die einzige Quelle
   der Wahrheit. Ende = Horizontende (zehn Jahre über das Projektende hinaus), Puffer 0, nicht Teil der
   Projektendbestimmung.
@@ -107,7 +110,7 @@ Prüfungen an die Fälligkeit gebunden:
 | Datei             | Inhalt                                                                                                                          |
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------------- |
 | `store.tsx`       | Datenbestand, Undo/Redo, Checkpoints, Autosave, Datei-Sperre. Zentrale API siehe unten.                                         |
-| `preferences.tsx` | Ansichts-Einstellungen in localStorage (Theme, Zeitraster, Szenario, Tiefengrad …). Nicht Teil von Undo.                        |
+| `preferences.tsx` | Ansichts-Einstellungen in localStorage (Theme, Zeitraster, Szenario …). Nicht Teil von Undo.                        |
 | `useDerived.ts`   | Memoisierte Ableitungen: Terminierung, Warnungen, sichtbare Aufgaben. **Komponenten rufen nie selbst `computeSchedule()` auf.** |
 
 ### `src/persistence/`

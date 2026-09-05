@@ -435,8 +435,6 @@ export function addDuration(start: IsoDate, amount: number, unit: DurationUnit):
         return new Date(d.getTime() + n * 7 * MS_PER_DAY);
       case 'months':
         return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + n, d.getUTCDate()));
-      case 'quarters':
-        return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 3 * n, d.getUTCDate()));
       case 'years':
         return new Date(Date.UTC(d.getUTCFullYear() + n, d.getUTCMonth(), d.getUTCDate()));
     }
@@ -457,8 +455,6 @@ export function subDuration(end: IsoDate, amount: number, unit: DurationUnit): I
         return new Date(d.getTime() - n * 7 * MS_PER_DAY);
       case 'months':
         return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - n, d.getUTCDate()));
-      case 'quarters':
-        return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - 3 * n, d.getUTCDate()));
       case 'years':
         return new Date(Date.UTC(d.getUTCFullYear() - n, d.getUTCMonth(), d.getUTCDate()));
     }
@@ -485,9 +481,9 @@ export function sliderMaxFor(unit: DurationUnit): number {
     case 'weeks':
       return 52;
     case 'months':
-      return 36;
-    case 'quarters':
-      return 20;
+      // Reicht bis fünf Jahre - so bleibt auch eine aus Quartalen
+      // umgerechnete Dauer (Schema 9) mit dem Regler erreichbar.
+      return 60;
     case 'years':
       return 10;
   }

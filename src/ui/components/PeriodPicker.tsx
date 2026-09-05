@@ -50,7 +50,7 @@ const SCALE_OPTION: Record<PeriodScale, { value: PeriodScale; label: string; tit
   custom: { value: 'custom', label: '' },
 };
 
-interface Selection {
+export interface Selection {
   year: number;
   scale: PeriodScale;
   /** Quartal 1-4, Monat 1-12 bzw. Kalenderwoche 1-53; bei `year` ohne Bedeutung. */
@@ -90,6 +90,53 @@ function parsePeriod(from?: IsoDate, to?: IsoDate): Selection {
   return { year, scale: 'custom', index: month };
 }
 
+/**
+ * Auf welches Raster passt ein einzelner Zeitpunkt - **grösstmöglich zuerst**?
+ *
+ * Der 1. Januar ist auch ein Quartals- und ein Monatsanfang; genannt wird das
+ * gröbste passende Raster, weil man in ihm gedacht hat, als man den Termin
+ * gesetzt hat. Passt keines, ist das Datum taggenau gemeint und gehört in ein
+ * Datumsfeld statt in eine Rasterauswahl.
+ */
+export function scaleOfStart(from?: IsoDate): PeriodScale {
+  if (!from) return 'custom';
+  const month = Number(from.slice(5, 7));
+  const day = from.slice(8, 10);
+  if (day === '01') {
+    if (month === 1) return 'year';
+    if (month === 4 || month === 7 || month === 10) return 'quarter';
+    return 'month';
+  }
+  if (startOfWeek(from) === from) return 'week';
+  return 'custom';
+}
+
+/** Passt der Zeitpunkt auf eine der Rasterstufen? */
+export function fitsScale(from?: IsoDate): boolean {
+  return scaleOfStart(from) !== 'custom';
+}
+
+/**
+ * Auswahl aus einem einzelnen Zeitpunkt - der Index passend zur **gezeigten**
+ * Stufe.
+ *
+ * Das ist der Unterschied zu `parsePeriod`: dort steht ohne Endtermin immer
+ * die Monatszahl im Index. Bei der Stufe "KW" wurde daraus die Kalenderwoche
+ * mit derselben Nummer - ein Septembertermin zeigte "KW 9".
+ */
+export function selectionOfStart(from: IsoDate | undefined, scale: PeriodScale): Selection {
+  const now = new Date().getUTCFullYear();
+  if (!from) return { year: now, scale, index: 1 };
+
+  const year = Number(from.slice(0, 4)) || now;
+  const month = Number(from.slice(5, 7)) || 1;
+
+  if (scale === 'week') return { year: isoWeekYear(from), scale, index: isoWeekNumber(from) };
+  if (scale === 'quarter') return { year, scale, index: Math.floor((month - 1) / 3) + 1 };
+  if (scale === 'year' || scale === 'total') return { year, scale, index: 1 };
+  return { year, scale, index: month };
+}
+
 /** Auswahlbereich: einige Jahre um das aktuelle herum plus das gesetzte Jahr. */
 function yearOptions(selected: number): number[] {
   const now = new Date().getUTCFullYear();
@@ -98,7 +145,7 @@ function yearOptions(selected: number): number[] {
   return [...years].sort((a, b) => a - b);
 }
 
-function boundsOf(selection: Selection): { from: IsoDate; to: IsoDate } {
+export function boundsOf(selection: Selection): { from: IsoDate; to: IsoDate } {
   if (selection.scale === 'year' || selection.scale === 'total') return periodBounds(selection.year, null);
   if (selection.scale === 'quarter') return periodBounds(selection.year, selection.index);
   // `custom` erreicht diese Stelle nie - es entsteht nur beim Lesen.
@@ -136,11 +183,19 @@ export function PeriodPicker({
 }) {
   const parsed = parsePeriod(from, to);
   const isTotal = Boolean(total && from === total.from && to === total.to);
-  const [startScale, setStartScale] = useState<PeriodScale>(parsed.scale);
+  /*
+   * Im Start-Modus gibt es kein Ende, aus dem sich die Stufe ablesen liesse.
+   * Ausgangspunkt ist deshalb das gröbste Raster, auf das der Zeitpunkt passt
+   * - danach entscheidet der Nutzer. Beim Wechsel auf eine andere Aufgabe
+   * setzt der Aufrufer die Komponente über `key` zurück.
+   */
+  const [startScale, setStartScale] = useState<PeriodScale>(() =>
+    mode === 'start' ? scaleOfStart(from) : parsed.scale,
+  );
   const selection: Selection = isTotal
     ? { ...parsed, scale: 'total' }
     : mode === 'start'
-      ? { ...parsed, scale: startScale }
+      ? selectionOfStart(from, startScale)
       : parsed;
 
   const apply = (patch: Partial<Selection>) => {
@@ -152,19 +207,16 @@ export function PeriodPicker({
     }
 
     /*
-     * Beim Wechsel der Stufe bleibt der **Zeitpunkt** stehen, nur die
-     * Körnung ändert sich: der Index wird aus dem bisherigen Beginn neu
-     * abgeleitet. Ihn zu übernehmen führte zu Sprüngen - aus "September"
-     * wurde beim Umschalten auf Wochen die KW 9, also Februar.
+     * Beim Wechsel der Stufe bleibt der **Zeitpunkt** stehen, nur die Körnung
+     * ändert sich. Denselben Weg geht `selectionOfStart` beim Anzeigen -
+     * deshalb hier dieselbe Funktion und nicht dieselbe Rechnung ein zweites
+     * Mal: als beides getrennt existierte, war der Umschaltpfad richtig und
+     * der Anzeigepfad zeigte für einen Septembertermin "KW 9".
      */
     if (patch.scale && patch.index === undefined) {
-      const anchor = from ?? `${next.year}-01-01`;
-      if (patch.scale === 'quarter') next.index = Math.floor((Number(anchor.slice(5, 7)) - 1) / 3) + 1;
-      if (patch.scale === 'month') next.index = Number(anchor.slice(5, 7));
-      if (patch.scale === 'week') {
-        next.year = isoWeekYear(anchor);
-        next.index = isoWeekNumber(anchor);
-      }
+      const derived = selectionOfStart(from ?? `${next.year}-01-01`, patch.scale);
+      next.year = derived.year;
+      next.index = derived.index;
     }
 
     const bounds = boundsOf(next);

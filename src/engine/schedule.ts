@@ -16,6 +16,7 @@
 import {
   DURATION_UNIT_LABEL,
   isOpenEnded,
+  isSettled,
   type Client,
   type DurationUnit,
   type Id,
@@ -25,6 +26,7 @@ import {
 import {
   addDays,
   addDuration,
+  countWorkdays,
   diffDays,
   isPlausibleIso,
   maxDate,
@@ -242,23 +244,12 @@ export function computeSchedule(client: Client, scenario: Scenario = 'max'): Sch
       for (const d of deps) depth = Math.max(depth, (byId.get(d)?.depth ?? 0) + 1);
     }
 
-    // Explizites Enddatum gewinnt gegenüber der Dauer (nur bei festem Start).
-    let unit = task.schedule.durationUnit;
-    let duration = durationOf(task, scenario);
-    let end = addDuration(start, duration, unit);
-    let endOptimistic = addDuration(start, durationOf(task, 'min'), unit);
-    let endPessimistic = addDuration(start, durationOf(task, 'max'), unit);
-
-    const fixedEnd = isPlausibleIso(task.schedule.end) ? task.schedule.end : undefined;
-    if (task.schedule.anchor === 'date' && fixedEnd && diffDays(start, fixedEnd) >= 0) {
-      // Ein gesetztes Ende ist taggenau; die Dauer ergibt sich daraus in
-      // Arbeitstagen, damit die Rückwärtsrechnung wieder dort landet.
-      unit = 'days';
-      duration = workdaysBetween(start, fixedEnd);
-      end = fixedEnd;
-      endOptimistic = fixedEnd;
-      endPessimistic = fixedEnd;
-    }
+    // Das Ende ergibt sich immer aus Beginn und Dauer - siehe TaskSchedule.
+    const unit = task.schedule.durationUnit;
+    const duration = durationOf(task, scenario);
+    const end = addDuration(start, duration, unit);
+    const endOptimistic = addDuration(start, durationOf(task, 'min'), unit);
+    const endPessimistic = addDuration(start, durationOf(task, 'max'), unit);
 
     byId.set(task.id, {
       task,
@@ -280,14 +271,33 @@ export function computeSchedule(client: Client, scenario: Scenario = 'max'): Sch
   }
 
   // --- Horizont ----------------------------------------------------------
+  /*
+   * Zwei Enden, die man nicht verwechseln darf:
+   *
+   *  - `projectEnd` ist die **äußere Kante des Plans**: das späteste
+   *    pessimistische Ende. Danach richten sich Achsen und das Ausbleichen der
+   *    Dauerläufer - dort ist der Plan in jedem Fall vorbei.
+   *  - `latestEnd` ist das späteste Ende **im gerechneten Szenario**. Nur
+   *    daran darf die Rückwärtsrechnung messen.
+   *
+   * Beides gleichzusetzen hat den optimistischen Fall unbrauchbar gemacht:
+   * dort endet jede Kette früher als ihr pessimistisches Ende, also bekam
+   * *jede* Aufgabe denselben Puffer (in den Beispieldaten 66 AT) und der
+   * kritische Pfad verschwand ganz. Ausgewiesen wurde damit nicht der Puffer
+   * im Plan, sondern die Dauerunschärfe der längsten Kette.
+   */
   let horizonStart: IsoDate | undefined;
   let projectEnd: IsoDate | undefined;
+  let latestEnd: IsoDate | undefined;
   for (const st of byId.values()) {
     horizonStart = horizonStart && diffDays(horizonStart, st.start) > 0 ? horizonStart : st.start;
-    if (!st.openEnded) projectEnd = maxDate(projectEnd, st.endPessimistic);
+    if (st.openEnded) continue;
+    projectEnd = maxDate(projectEnd, st.endPessimistic);
+    latestEnd = maxDate(latestEnd, st.end);
   }
   horizonStart = horizonStart ?? defaultStart;
   projectEnd = projectEnd ?? addDays(horizonStart, 30);
+  const scenarioEnd = latestEnd ?? projectEnd;
 
   // Dauerläufer laufen bis zum Ende des Betrachtungszeitraums weiter.
   const hasOpenEnded = [...byId.values()].some((s) => s.openEnded);
@@ -330,8 +340,8 @@ export function computeSchedule(client: Client, scenario: Scenario = 'max'): Sch
     }
 
     if (successors.length === 0) {
-      // Endaufgabe: spätestes Ende ist das Projektende.
-      st.lateEnd = projectEnd;
+      // Endaufgabe: spätestes Ende ist das Projektende dieses Szenarios.
+      st.lateEnd = scenarioEnd;
     } else {
       /*
        * Die späteste Lage wird vom **frühesten** Nachfolger bestimmt: sobald
@@ -347,7 +357,7 @@ export function computeSchedule(client: Client, scenario: Scenario = 'max'): Sch
         const candidate = prevWorkday(addDays(s.lateStart, -1));
         earliest = earliest === undefined || diffDays(candidate, earliest) > 0 ? candidate : earliest;
       }
-      st.lateEnd = earliest ?? projectEnd;
+      st.lateEnd = earliest ?? scenarioEnd;
     }
     // lateStart aus lateEnd und Dauer zurückrechnen - in derselben Einheit,
     // in der auch vorwärts gerechnet wurde.
@@ -442,6 +452,35 @@ function definedPeriodRange(client: Client): { from?: IsoDate; to?: IsoDate } {
  * über Abhängigkeiten (in beide Richtungen) erreichbar sind.
  * `depth === Infinity` liefert den gesamten zusammenhängenden Graphen.
  */
+/**
+ * Wie weit ist eine Aufgabe? Als Anteil 0..1, bezogen auf **heute**.
+ *
+ * Gemessen an ihrer eigenen Laufzeit in Arbeitstagen: noch nicht begonnen ist
+ * 0, der geplante Endtermin vorbei ist 1. Erledigt und Betrieb sind fachlich
+ * abgeschlossen (siehe `isSettled`) und damit voll - bei einem Dauerläufer
+ * wäre ein Zeitanteil gegen den Zehnjahreshorizont ohnehin ohne Aussage.
+ *
+ * Steht hier und nicht in einer Ansicht: der Fortschritt erscheint am
+ * Netzplan-Knoten **und** in "Wer arbeitet woran?". Zwei Rechnungen für
+ * dieselbe Zahl laufen früher oder später auseinander.
+ */
+export function taskProgress(task: Task | undefined, st: ScheduledTask | undefined): number {
+  if (!task || !st) return 0;
+  if (isSettled(task.status)) return 1;
+  const heute = today();
+  if (diffDays(heute, st.start) > 0) return 0;
+  if (diffDays(st.end, heute) > 0) return 1;
+  const gesamt = countWorkdays(st.start, st.end);
+  if (gesamt <= 0) return 0;
+  return Math.min(1, Math.max(0, countWorkdays(st.start, heute) / gesamt));
+}
+
+/** Der geplante Endtermin liegt hinter uns und die Aufgabe ist noch offen. */
+export function isOverdue(task: Task | undefined, st: ScheduledTask | undefined): boolean {
+  if (!task || !st || isSettled(task.status)) return false;
+  return diffDays(st.end, today()) > 0;
+}
+
 export function collectNeighbourhood(tasks: Task[], rootId: Id | null, depth: number): Set<Id> {
   const result = new Set<Id>();
   if (!rootId) {

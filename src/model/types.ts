@@ -16,7 +16,7 @@ export type IsoDateTime = string;
 
 export type Id = string;
 
-export const CURRENT_SCHEMA_VERSION = 7;
+export const CURRENT_SCHEMA_VERSION = 9;
 
 // ---------------------------------------------------------------------------
 // Aufgaben
@@ -68,12 +68,19 @@ export function isSettled(status: TaskStatus): boolean {
  * ist 0) noch ein festes `end`. Es gibt dafür bewusst kein eigenes Kennzeichen -
  * siehe `isOpenEnded()`.
  */
+/**
+ * Terminierung einer Aufgabe.
+ *
+ * **Das Ende wird nie gespeichert**, es ergibt sich immer aus Beginn und
+ * Dauer. Früher gab es ein optionales festes Ende, das die Dauer überschrieb -
+ * damit waren zwei Angaben für dieselbe Sache im Umlauf, und der
+ * Dauerschieber lief bei so einer Aufgabe ins Leere. Wer taggenau terminieren
+ * will, gibt den Beginn taggenau an und die Dauer in Arbeitstagen.
+ */
 export interface TaskSchedule {
   anchor: "date" | "dependency";
   /** Nur relevant bei anchor === 'date'. */
   start?: IsoDate;
-  /** Optionales festes Ende; überschreibt die Dauer, wenn gesetzt. */
-  end?: IsoDate;
   /** Optimistische Dauer in `durationUnit`; 0 = kein Enddatum. */
   durationMin: number;
   /** Pessimistische Dauer in `durationUnit` (>= durationMin); 0 = kein Enddatum. */
@@ -88,24 +95,27 @@ export interface TaskSchedule {
  * `days` sind **Arbeitstage** (Mo-Fr, keine Feiertage). Alle anderen Einheiten
  * sind Kalenderzeit und werden nicht in Arbeitstage umgerechnet - sonst
  * verschöbe sich das Ende einer Mehrjahresaufgabe um Monate.
+ *
+ * Quartale gab es bis Schema 8 zusätzlich; sie waren exakt drei Monate und
+ * damit eine zweite Schreibweise für dasselbe. Bestehende Angaben wurden beim
+ * Hochstufen in Monate umgerechnet.
  */
-export type DurationUnit = "days" | "weeks" | "months" | "quarters" | "years";
+export type DurationUnit = "days" | "weeks" | "months" | "years";
 
 export const DURATION_UNIT_LABEL: Record<DurationUnit, string> = {
   days: "AT",
   weeks: "Wochen",
   months: "Monate",
-  quarters: "Quartale",
   years: "Jahre",
 };
 
 /**
- * Dauerläufer: die Aufgabe hat kein Enddatum - keine Dauer und kein festes
- * Ende. Einzige Quelle der Wahrheit für diese Eigenschaft; nirgends wird ein
+ * Dauerläufer: die Aufgabe hat kein Enddatum, weil sie keine Dauer hat.
+ * Einzige Quelle der Wahrheit für diese Eigenschaft; nirgends wird ein
  * gespeichertes Kennzeichen dafür gehalten.
  */
 export function isOpenEnded(schedule: TaskSchedule): boolean {
-  return schedule.durationMax <= 0 && !schedule.end;
+  return schedule.durationMax <= 0;
 }
 
 /** Relative Verschiebung eines Netzplan-Knotens gegenüber dem Auto-Layout. */

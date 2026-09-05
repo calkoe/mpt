@@ -11,7 +11,7 @@ import { useStore } from '../../state/store';
 import type { Granularity } from '../../engine/dates';
 import { GRANULARITY_LABEL, SELECTABLE_GRANULARITIES } from '../../engine/dates';
 import type { Scenario } from '../../engine/schedule';
-import { Button, EmptyState, NumberSlider, Segmented, Switch } from '../components/controls';
+import { Button, EmptyState, Segmented, Switch } from '../components/controls';
 import { SplitStack } from '../components/SplitStack';
 import { TagFilter } from '../components/TagFilter';
 import { ChartToolbarProvider, ChartToolbarSlot } from '../components/ChartToolbar';
@@ -89,26 +89,6 @@ export function TaskOverview() {
             />
           )}
 
-          {/* Tiefe: kurzer Schieber mit kleiner Zahl - hier wird geschoben,
-              nicht getippt. */}
-          <div
-            className="row"
-            style={{ width: 118 }}
-            title="Wieviele Abhängigkeitsebenen um die gewählte Aufgabe gezeigt werden"
-          >
-            <span className="faint nowrap" style={{ fontSize: 'var(--fs-sm)' }}>
-              Tiefe
-            </span>
-            <NumberSlider
-              compact
-              min={0}
-              max={99}
-              value={prefs.depth}
-              format={(v) => (v >= 99 ? 'alle' : String(v))}
-              onChange={(depth) => setPrefs({ depth: Math.round(depth) })}
-            />
-          </div>
-
           <div className="spacer" />
 
           {/*
@@ -122,10 +102,13 @@ export function TaskOverview() {
               value={prefs.weighting}
               onChange={(weighting) => setPrefs({ weighting })}
               options={[
-                { value: 'none', label: 'ohne', title: 'Keine Gewichtung' },
-                { value: 'duration', label: 'Zeit', title: 'Balken nach Dauer' },
-                { value: 'cost', label: 'Kosten', title: 'Balken nach Kosten' },
-                { value: 'people', label: 'Personal', title: 'Balken nach Personalaufwand' },
+                { value: 'none', label: 'ohne', title: 'Kein Balken am Knoten' },
+                {
+                  value: 'duration',
+                  label: 'Zeit',
+                  title: 'Balken zeigt den Fortschritt im geplanten Zeitraum - leer heisst noch nicht begonnen',
+                },
+                { value: 'cost', label: 'Kosten', title: 'Balken nach Kosten, gefüllt nach abgerufenem Anteil' },
               ]}
             />
           )}

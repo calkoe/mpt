@@ -396,7 +396,7 @@ export function createDemoClient(): Client {
   // Haengt in der Kette statt an einem festen Datum: sonst endet der kritische
   // Pfad bei der Abnahme und alle Vorgaenger bekommen einen riesigen Puffer,
   // der den ganzen Balkenplan grau zuzieht.
-  ausbau.schedule = { anchor: 'dependency', durationMin: 2, durationMax: 3, durationUnit: 'quarters' };
+  ausbau.schedule = { anchor: 'dependency', durationMin: 6, durationMax: 9, durationUnit: 'months' };
   ausbau.dependsOn = [abnahme.id];
   ausbau.tagIds = [tagInfra.id];
   ausbau.assignments = [{ ...createAssignment(mira.id), mode: 'FTE', value: 0.4 }];
