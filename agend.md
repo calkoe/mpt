@@ -656,3 +656,15 @@ Arbeitstage und heissen ab jetzt ausdrücklich so — die Migration ändert kein
 - Vorhaben bearbeiten liegt hinter einem Pfeil, der nur am gewählten Vorhaben erscheint.
 - Heller Modus: Kontrast in den Editoren gedreht. Warnsymbol neutral und ohne Zahl.
   Speicherstatus mit "lokal" und blauem Warten. Netzplan-Titel werden gemessen statt gezählt.
+
+
+## v1.4.1 — Wiederverbinden ohne Umweg
+
+Der Knopf "zuletzt verwendete Datei laden" scheiterte zuverlässig: nach einem Neuladen
+gilt die Berechtigung für einen gemerkten Dateihandle nicht mehr, und die vorhandene
+Prüfung `hasWritePermission()` wurde nirgends aufgerufen. Der Browser erteilt die
+Berechtigung nur aus einer Nutzergeste heraus - jetzt geschieht das beim Klick.
+
+Scheitert es trotzdem (Berechtigung abgelehnt, Datei verschoben oder gelöscht), erscheint
+**kein Fehlerdialog** mehr: der Knopf ist eine Abkürzung, und wenn sie nicht greift, führt
+er ohne Umweg in die Dateiauswahl.

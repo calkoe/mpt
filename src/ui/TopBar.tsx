@@ -16,6 +16,7 @@ import { usePreferences, type ThemeSetting } from "../state/preferences";
 import {
   createDatabaseFile,
   downloadText,
+  hasWritePermission,
   isFileSystemAccessSupported,
   openDatabaseFile,
   pickFileViaInput,
@@ -97,16 +98,30 @@ export function TopBar({
     }
   };
 
+  /**
+   * Zuletzt verwendete Datei erneut verbinden.
+   *
+   * Nach einem Neuladen der Seite gilt die Berechtigung für einen gemerkten
+   * Handle nicht mehr - der Browser erteilt sie nur aus einer Nutzergeste
+   * heraus, also genau hier beim Klick. Ohne diese Nachfrage scheiterte der
+   * Knopf jedes Mal.
+   *
+   * Scheitert es trotzdem - Berechtigung abgelehnt, Datei verschoben oder
+   * gelöscht -, gibt es **keinen Fehlerdialog**: der Knopf ist eine Abkürzung,
+   * und wenn sie nicht greift, gehört man ohne Umweg dorthin, wo man ohnehin
+   * hinwollte - in die Dateiauswahl.
+   */
   const loadFromHandle = async (handle: FileSystemFileHandle) => {
     setError(null);
     try {
+      if (!(await hasWritePermission(handle, true))) throw new Error('Zugriff nicht erlaubt.');
       adoptResult(await readFromHandle(handle));
-    } catch (e) {
-      setError((e as Error).message);
+    } catch {
+      await openFile({ quiet: true });
     }
   };
 
-  const openFile = async () => {
+  const openFile = async (options?: { quiet?: boolean }) => {
     setError(null);
     try {
       if (isFileSystemAccessSupported()) {
@@ -126,7 +141,8 @@ export function TopBar({
       ]);
       setDialog("notes");
     } catch (e) {
-      setError((e as Error).message);
+      // Beim Rückfall aus dem Wiederverbinden bleibt es still - siehe dort.
+      if (!options?.quiet) setError((e as Error).message);
     }
   };
 
@@ -188,7 +204,7 @@ export function TopBar({
 
       <div className="topbar__divider" />
 
-      <Button onClick={openFile} title="Datenbestand öffnen (Strg+O)">
+      <Button onClick={() => void openFile()} title="Datenbestand öffnen (Strg+O)">
         Öffnen
       </Button>
       <Button onClick={newFile} title="Neuen leeren Datenbestand anlegen">

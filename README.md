@@ -101,7 +101,7 @@ die Anwendung ein, die sie klein unten rechts anzeigt.
 
 ```bash
 # Version in package.json anheben, committen, dann:
-git tag v1.4.0 && git push origin v1.4.0
+git tag v1.4.1 && git push origin v1.4.1
 ```
 
 Veröffentlicht wird ausschließlich über solche Tags. Die CI prüft, dass der Tag die Form `vN.N.N`
