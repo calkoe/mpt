@@ -1262,6 +1262,28 @@ h1, h2, h3, h4 {
 .reschart__legend .chip { flex: none; max-width: 220px; }
 .reschart__legend { padding-right: var(--sp-3); }
 
+/* Anklickbarer Zeitraum - oeffnet die Auswertung (nur in der Detailansicht). */
+.chart__bucket--pickable { cursor: pointer; }
+
+/*
+ * Auswertungstabelle. Erste Spalten linksbuendig (Namen), Zahlen rechts -
+ * `.table` richtet grundsaetzlich rechts aus, weil es sonst nur Zahlen zeigt.
+ */
+.breakdown th,
+.breakdown td { text-align: left; }
+.breakdown .table__num { text-align: right; }
+.breakdown thead th { background: var(--surface-2); }
+.breakdown tfoot td {
+  font-weight: 600;
+  border-top: 1px solid var(--border-strong);
+  border-bottom: none;
+}
+.breakdown__empty { padding: var(--sp-3); font-size: var(--fs-sm); }
+
+
+.breakdown__row--clickable { cursor: pointer; }
+.breakdown__row--clickable:hover td { background: var(--surface-3); }
+
 /*
  * Ganglinien: zwei nebeneinander, damit mehr Ressourcen gleichzeitig sichtbar
  * sind. Die Zeilen fuellen die verfuegbare Hoehe (`1fr`), fallen aber nie

@@ -18,6 +18,8 @@ import type { Budget, Client, CostItem, Task, Venture } from '../model/types';
 import { createBudget, createClient, createTask, createVenture } from '../model/factory';
 import { computeSchedule } from './schedule';
 import {
+  breakdownOfPoint,
+  buildBreakdown,
   budgetCeiling,
   budgetDailyLoad,
   budgetSeries,
@@ -459,5 +461,132 @@ describe('Budget: Auslastung und Warnungen', () => {
     expect(series().breaches).toEqual([]);
     client.tasks[0].costs[0].actualAmount = 5000;
     expect(series().breaches).toEqual([String(YEAR)]);
+  });
+  /*
+   * Die Auswertung darf dem Diagramm nie widersprechen. Sie erscheint an zwei
+   * Stellen - unter einer Ganglinie und als Dialog über eine ganze Liste - und
+   * beide muessen mit den Zahlen uebereinstimmen, die daneben stehen.
+   */
+  describe('Auswertung', () => {
+    it('summiert sich auf dieselbe Zahl wie die Zeitraumsumme', () => {
+      const { client, budget } = setup({
+        start: JAN_1,
+        end: '2026-12-31',
+        costs: [
+          cost({ budgetId: '', amount: 1200, actualAmount: 400, recurring: true, interval: 'month' }),
+          cost({ budgetId: '', amount: 5000, actualAmount: 2500 }),
+        ],
+      });
+      const schedule = computeSchedule(client, 'max');
+      const daily = budgetDailyLoad(client, schedule, EMPTY_FILTER).get(budget.id)!;
+
+      const summe = sumDailyLoad(daily, JAN_1, '2026-12-31');
+      const aus = buildBreakdown([{ resourceId: budget.id, name: budget.name, daily }], {
+        label: 'Test',
+        from: JAN_1,
+        to: '2026-12-31',
+        unit: 'EUR',
+        ceiling: null,
+      });
+
+      expect(aus.planned).toBeCloseTo(summe.planned, 6);
+      expect(aus.actual).toBeCloseTo(summe.actual, 6);
+      // Die Zeilen selbst muessen dieselbe Summe ergeben.
+      expect(aus.rows.reduce((s, r) => s + r.planned, 0)).toBeCloseTo(summe.planned, 6);
+    });
+
+    it('deckt sich mit dem Balken, auf den geklickt wurde', () => {
+      const { client, budget } = setup({
+        start: JAN_1,
+        end: '2026-12-31',
+        costs: [cost({ budgetId: '', amount: 300, actualAmount: 100, recurring: true, interval: 'month' })],
+      });
+      const schedule = computeSchedule(client, 'max');
+      const daily = budgetDailyLoad(client, schedule, EMPTY_FILTER).get(budget.id)!;
+      const series = budgetSeries(budget, daily, {
+        from: JAN_1,
+        to: `${YEAR}-12-31`,
+        granularity: 'quarter',
+        personUnit: 'FTE',
+      });
+
+      for (const point of series.points) {
+        const aus = breakdownOfPoint(series, point);
+        expect(aus.planned).toBeCloseTo(point.value, 9);
+        expect(aus.actual).toBeCloseTo(point.actual, 9);
+        expect(aus.rows).toHaveLength(point.parts.length);
+        // Der Rahmen ist genau die Grenzwertlinie des Diagramms; ohne Grenze null.
+        expect(aus.ceiling).toBe(point.limit > 0 ? point.limit : null);
+        // Und dieselbe Zahl noch einmal ueber den Weg der Liste gerechnet.
+        const direkt = buildBreakdown([{ resourceId: budget.id, name: budget.name, daily }], {
+          label: point.bucket.label,
+          from: point.bucket.start,
+          to: point.bucket.end,
+          unit: 'EUR',
+          ceiling: null,
+        });
+        expect(direkt.planned).toBeCloseTo(point.value, 6);
+      }
+    });
+
+    it('traegt die Obergrenze des Zeitraums als Rahmen, nicht null', () => {
+      const { client, budget } = setup({
+        start: JAN_1,
+        end: '2026-12-31',
+        budget: { limits: [{ id: 'l', from: '2026-01-01', to: '2026-12-31', value: 9000 }] },
+        costs: [cost({ budgetId: '', amount: 1000 })],
+      });
+      const schedule = computeSchedule(client, 'max');
+      const daily = budgetDailyLoad(client, schedule, EMPTY_FILTER).get(budget.id)!;
+      const series = budgetSeries(budget, daily, {
+        from: JAN_1,
+        to: `${YEAR}-12-31`,
+        granularity: 'year',
+        personUnit: 'FTE',
+      });
+
+      const mitGrenze = breakdownOfPoint(series, series.points[0]);
+      expect(mitGrenze.ceiling).toBe(9000);
+      // Ein Jahr ohne Scheibe hat keine Grenze - und das ist nicht "0 Euro".
+      const ohne = series.points.find((p) => p.limit === 0);
+      if (ohne) expect(breakdownOfPoint(series, ohne).ceiling).toBeNull();
+    });
+
+    it('mittelt bei FTE ueber die Arbeitstage statt zu summieren', () => {
+      // Zwei Beitraege an zwei Arbeitstagen einer Woche, je 1 FTE.
+      const daily = new Map([
+        ['2026-01-05', [{ taskId: 't1', value: 1 }]],
+        ['2026-01-06', [{ taskId: 't1', value: 1 }]],
+      ]);
+      const woche = { from: '2026-01-05', to: '2026-01-09' };
+
+      const alsFte = buildBreakdown([{ resourceId: 'p', name: 'P', daily }], { label: 'KW', ...woche, unit: 'FTE', ceiling: null });
+      const alsPt = buildBreakdown([{ resourceId: 'p', name: 'P', daily }], { label: 'KW', ...woche, unit: 'PT', ceiling: null });
+
+      // Fuenf Arbeitstage, zwei belegt: 2/5 FTE im Mittel, aber 2 Personentage.
+      expect(alsFte.planned).toBeCloseTo(0.4, 9);
+      expect(alsPt.planned).toBeCloseTo(2, 9);
+    });
+
+    it('fasst je Ressource und Aufgabe zusammen und laesst nichts draussen', () => {
+      const daily = new Map([
+        ['2026-03-02', [{ taskId: 'a', value: 10 }, { taskId: 'b', value: 5 }]],
+        ['2026-03-03', [{ taskId: 'a', value: 7 }]],
+        // Ausserhalb des Zeitraums - darf nicht mitzaehlen.
+        ['2026-04-01', [{ taskId: 'a', value: 999 }]],
+      ]);
+      const aus = buildBreakdown(
+        [
+          { resourceId: 'r1', name: 'Eins', daily },
+          { resourceId: 'r2', name: 'Zwei', daily },
+        ],
+        { label: 'Maerz', from: '2026-03-01', to: '2026-03-31', unit: 'EUR', ceiling: null },
+      );
+
+      expect(aus.rows).toHaveLength(4); // zwei Ressourcen x zwei Aufgaben
+      expect(aus.planned).toBeCloseTo(2 * 22, 9);
+      expect(aus.rows[0]).toMatchObject({ taskId: 'a', planned: 17 });
+      expect(aus.rows.every((r) => r.planned !== 999)).toBe(true);
+    });
   });
 });

@@ -683,22 +683,149 @@ export function sumDailyLoad(
 ): { planned: number; actual: number } {
   let planned = 0;
   let actual = 0;
-  /*
-   * Über die vorhandenen Einträge, nicht über jeden Tag des Zeitraums: die
-   * Karte ist dünn besetzt, der Zeitraum kann Jahre umfassen. Damit entfällt
-   * auch die frühere Notbremse gegen zu lange Schleifen.
-   */
-  const fromDayNo = toDay(from);
-  const toDayNo = toDay(to);
-  for (const [iso, list] of daily) {
-    const day = toDay(iso);
-    if (day < fromDayNo || day > toDayNo) continue;
-    for (const c of list) {
-      planned += c.value;
-      actual += c.actual ?? 0;
-    }
+  for (const c of contributionsIn(daily, from, to)) {
+    planned += c.value;
+    actual += c.actual ?? 0;
   }
   return { planned, actual };
+}
+
+/**
+ * Alle Beiträge im Zeitraum [from, to].
+ *
+ * Über die vorhandenen Einträge, nicht über jeden Tag: die Karte ist dünn
+ * besetzt, der Zeitraum kann Jahre umfassen.
+ */
+function contributionsIn(daily: Map<IsoDate, Contribution[]>, from: IsoDate, to: IsoDate): Contribution[] {
+  const fromDay = toDay(from);
+  const toDayNo = toDay(to);
+  const out: Contribution[] = [];
+  for (const [iso, list] of daily) {
+    const day = toDay(iso);
+    if (day < fromDay || day > toDayNo) continue;
+    out.push(...list);
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Auswertung: welche Aufgabe steuert wieviel bei?
+// ---------------------------------------------------------------------------
+
+/** Eine Zeile einer Auswertung - der Beitrag einer Aufgabe zu einer Ressource. */
+export interface BreakdownRow {
+  resourceId: Id;
+  resourceName: string;
+  taskId: Id;
+  planned: number;
+  /** Nur bei Budgets belegt. */
+  actual: number;
+  /**
+   * Rahmen **dieser Ressource** im Zeitraum - bei Personen die verfügbare
+   * Kapazität. Gehört zur Ressource, nicht zur Aufgabe; die Tabelle zeigt ihn
+   * deshalb nur einmal je Ressource. `null` = keine Obergrenze.
+   */
+  resourceCeiling: number | null;
+}
+
+export interface Breakdown {
+  /** Überschrift des Zeitraums, z.B. "KW 37" oder "2026". */
+  label: string;
+  from: IsoDate;
+  to: IsoDate;
+  unit: PersonUnit | 'EUR';
+  rows: BreakdownRow[];
+  planned: number;
+  actual: number;
+  /**
+   * Der Rahmen: bei Personen die verfügbare Kapazität, bei Budgets die
+   * genehmigte Obergrenze - beides über denselben Zeitraum wie die Zeilen.
+   * `null` heisst **keine Obergrenze**, nicht null Euro; die beiden dürfen nie
+   * verwechselt werden.
+   */
+  ceiling: number | null;
+}
+
+/**
+ * Auswertung über eine oder mehrere Ressourcen für einen Zeitraum.
+ *
+ * **Dieselbe Rechnung wie im Diagramm** - bei FTE wird über die Arbeitstage
+ * gemittelt, sonst summiert. Zwei Wege zu einer Zahl wären genau die Art von
+ * doppelter Wahrheit, die man später nicht mehr auseinanderhält: die Tabelle
+ * unter einer Ganglinie muss zeigen, was die Ganglinie zeigt.
+ */
+export function buildBreakdown(
+  sources: {
+    resourceId: Id;
+    name: string;
+    daily: Map<IsoDate, Contribution[]>;
+    /** Verfügbar bzw. genehmigt im Zeitraum; `null` = keine Obergrenze. */
+    ceiling?: number | null;
+  }[],
+  options: { label: string; from: IsoDate; to: IsoDate; unit: PersonUnit | 'EUR'; ceiling: number | null },
+): Breakdown {
+  const divisor =
+    options.unit === 'FTE' ? Math.max(1, countWorkdays(options.from, options.to)) : 1;
+
+  const rows: BreakdownRow[] = [];
+  let planned = 0;
+  let actual = 0;
+
+  for (const source of sources) {
+    const perTask = new Map<Id, { planned: number; actual: number }>();
+    for (const c of contributionsIn(source.daily, options.from, options.to)) {
+      const entry = perTask.get(c.taskId) ?? { planned: 0, actual: 0 };
+      entry.planned += c.value;
+      entry.actual += c.actual ?? 0;
+      perTask.set(c.taskId, entry);
+    }
+    for (const [taskId, entry] of perTask) {
+      const row = {
+        resourceId: source.resourceId,
+        resourceName: source.name,
+        taskId,
+        planned: entry.planned / divisor,
+        actual: entry.actual / divisor,
+        resourceCeiling: source.ceiling ?? null,
+      };
+      rows.push(row);
+      planned += row.planned;
+      actual += row.actual;
+    }
+  }
+
+  // Grösster Beitrag zuerst - danach sieht man zuerst, worum es geht.
+  rows.sort((a, b) => b.planned - a.planned || a.resourceName.localeCompare(b.resourceName, 'de'));
+  return { ...options, rows, planned, actual };
+}
+
+/**
+ * Auswertung eines einzelnen Zeitraums einer Ganglinie.
+ *
+ * Hier wird **nicht neu gerechnet**: die Anteile stehen bereits im Punkt und
+ * sind genau die Zahlen, die der Balken und der Tooltip zeigen. Eine zweite
+ * Rechnung könnte davon abweichen, und die Tabelle unter einem Diagramm darf
+ * dem Diagramm nie widersprechen.
+ */
+export function breakdownOfPoint(series: ResourceSeries, point: SeriesPoint): Breakdown {
+  return {
+    label: point.bucket.label,
+    from: point.bucket.start,
+    to: point.bucket.end,
+    unit: series.unit,
+    // Der Grenzwert des Zeitraums - genau die Linie, die im Diagramm darüber liegt.
+    ceiling: point.limit > 0 ? point.limit : null,
+    rows: point.parts.map((part) => ({
+      resourceId: series.resourceId,
+      resourceName: series.name,
+      taskId: part.taskId,
+      planned: part.value,
+      actual: part.actual ?? 0,
+      resourceCeiling: point.limit > 0 ? point.limit : null,
+    })),
+    planned: point.value,
+    actual: point.actual,
+  };
 }
 
 /** Verfügbare Kapazität einer Person im Zeitraum, in Personentagen. */

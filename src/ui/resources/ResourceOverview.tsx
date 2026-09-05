@@ -27,6 +27,8 @@ import {
   sumDailyLoad,
   totalBudgetOf,
   totalPersonOf,
+  buildBreakdown,
+  type Breakdown,
   type Contribution,
   type PersonUnit,
   type ResourceFilter,
@@ -58,6 +60,7 @@ import { moveItem, useReorder } from '../components/useReorder';
 import { TagFilter } from '../components/TagFilter';
 import { PeriodPicker } from '../components/PeriodPicker';
 import { RESCHART_AXES_FIT, ResourceChart } from './ResourceChart';
+import { BreakdownDialog } from './ResourceBreakdown';
 import { ResourceTable } from './ResourceTable';
 import { BudgetEditor, PersonEditor, ResourceEditorHeader } from './ResourceEditors';
 
@@ -228,6 +231,14 @@ export function ResourceOverview() {
   const detailPlotRef = useRef<SVGSVGElement>(null);
   const detailAxesRef = useRef<SVGSVGElement>(null);
 
+  /**
+   * Offene Auswertung - **ein** Zustand für beide Wege dorthin: den Klick auf
+   * einen Zeitraum im Diagramm und den Knopf unter einer Ressourcenliste. Zwei
+   * getrennte Dialoge für dieselbe Tabelle wären zwei Stellen, an denen sie
+   * auseinanderlaufen kann.
+   */
+  const [report, setReport] = useState<Breakdown | null>(null);
+
   const charts = (
     <div className="panel">
         <div className="panel__head">
@@ -376,6 +387,7 @@ export function ResourceOverview() {
                         /* Nur die eine Kachel der Detailansicht wird exportiert. */
                         plotRef={selectedId ? detailPlotRef : undefined}
                         axesRef={selectedId ? detailAxesRef : undefined}
+                        onAnalyse={selectedId ? setReport : undefined}
                         onOpen={() => setUi({ selectedResourceId: series.resourceId })}
                         onSelectTask={(taskId) => {
                           const task = derived.taskById.get(taskId);
@@ -466,6 +478,7 @@ export function ResourceOverview() {
               personLoads={personLoads}
               budgetLoads={budgetLoads}
               horizon={{ from: options.from, to: options.to }}
+              onReport={setReport}
             />
           )}
         </div>
@@ -473,12 +486,26 @@ export function ResourceOverview() {
   );
 
   return (
-    <SplitStack
-      ratio={prefs.splitRatio}
-      onRatioChange={(splitRatio) => setPrefs({ splitRatio })}
-      top={charts}
-      bottom={details}
-    />
+    <>
+      <SplitStack
+        ratio={prefs.splitRatio}
+        onRatioChange={(splitRatio) => setPrefs({ splitRatio })}
+        top={charts}
+        bottom={details}
+      />
+      {report && (
+        <BreakdownDialog
+          breakdown={report}
+          taskLabel={taskLabel}
+          onClose={() => setReport(null)}
+          onSelectTask={(taskId) => {
+            const task = derived.taskById.get(taskId);
+            setUi({ mode: 'tasks', selectedTaskId: taskId, ventureId: task?.ventureId ?? null });
+            setReport(null);
+          }}
+        />
+      )}
+    </>
   );
 }
 
@@ -525,6 +552,7 @@ function SeriesCard({
   axesRef,
   onOpen,
   onSelectTask,
+  onAnalyse,
 }: {
   series: ResourceSeries;
   taskLabel: (id: Id) => string;
@@ -535,9 +563,18 @@ function SeriesCard({
   axesRef?: React.RefObject<SVGSVGElement>;
   onOpen: () => void;
   onSelectTask: (taskId: Id) => void;
+  /** Nur in der Detailansicht: Klick auf einen Zeitraum öffnet die Auswertung. */
+  onAnalyse?: (breakdown: Breakdown) => void;
 }) {
   const [hovered, setHovered] = useState<ResourceSeries['points'][number] | null>(null);
   const isBudget = series.kind === 'budget';
+  /*
+   * "Gesamt" bei Personen nur in Personentagen. In FTE ist der Wert ein
+   * Mittelwert über die belegten Zeiträume und damit keine Summe - als
+   * "gesamt" gelesen führt er in die Irre, deshalb steht dort ohne Zeiger
+   * gar nichts.
+   */
+  const hasTotal = isBudget || series.unit !== 'FTE';
 
   return (
     <div
@@ -557,7 +594,7 @@ function SeriesCard({
         <span className={`status-dot status-dot--${series.breaches.length > 0 ? 'breach' : 'ok'}`} />
         <span className="panel__title truncate">{series.name}</span>
         <span className="faint nowrap" style={{ fontSize: 'var(--fs-sm)' }}>
-          {hovered ? hovered.bucket.label : 'gesamt'}
+          {hovered ? hovered.bucket.label : hasTotal ? 'gesamt' : ''}
         </span>
 
         {isBudget ? (
@@ -568,14 +605,16 @@ function SeriesCard({
           </span>
         ) : (
           <span className="row faint nowrap" style={{ fontSize: 'var(--fs-sm)' }}>
-            {hovered && hovered.limit > 0 && (
-              <MeasureAmount measure="approved" value={hovered.limit} suffix={series.unit as 'FTE' | 'PT'} />
+            {hovered ? (
+              <>
+                {hovered.limit > 0 && (
+                  <MeasureAmount measure="approved" value={hovered.limit} suffix={series.unit as 'FTE' | 'PT'} />
+                )}
+                <MeasureAmount measure="planned" value={hovered.value} suffix={series.unit as 'FTE' | 'PT'} />
+              </>
+            ) : (
+              hasTotal && <MeasureAmount measure="planned" value={series.total} suffix={series.unit as 'FTE' | 'PT'} />
             )}
-            <MeasureAmount
-              measure="planned"
-              value={hovered ? hovered.value : series.total}
-              suffix={series.unit as 'FTE' | 'PT'}
-            />
           </span>
         )}
       </div>
@@ -589,6 +628,7 @@ function SeriesCard({
         onSelectTask={onSelectTask}
         plotRef={plotRef}
         axesRef={axesRef}
+        onAnalyse={onAnalyse}
       />
     </div>
   );
@@ -619,6 +659,7 @@ function ResourceLists({
   personLoads,
   budgetLoads,
   horizon,
+  onReport,
 }: {
   personSeriesList: ResourceSeries[];
   budgetSeriesList: ResourceSeries[];
@@ -626,6 +667,8 @@ function ResourceLists({
   budgetLoads: Map<Id, Map<IsoDate, Contribution[]>>;
   /** Ganzer Betrachtungszeitraum - die Auswahl "Gesamt" meint genau ihn. */
   horizon: { from: IsoDate; to: IsoDate };
+  /** Zeigt die fertige Auswertung - siehe ResourceOverview. */
+  onReport: (breakdown: Breakdown) => void;
 }) {
   const { client, setUi, commitClient } = useStore();
   const derived = useDerived();
@@ -648,6 +691,58 @@ function ResourceLists({
   const thisYear = { from: `${yearOf(today())}-01-01`, to: `${yearOf(today())}-12-31` };
   const [personRange, setPersonRange] = useState(thisYear);
   const [budgetRange, setBudgetRange] = useState(thisYear);
+
+  /**
+   * Die Auswertung entsteht aus genau dem, was die Liste gerade zeigt:
+   * derselbe Zeitraum, dieselben gefilterten Ressourcen. Eine eigene Auswahl
+   * daneben wäre eine zweite Wahrheit über denselben Ausschnitt. Gezeigt wird
+   * sie eine Ebene höher - im selben Dialog wie ein Klick im Diagramm.
+   */
+  const makeReport = (
+    kind: 'person' | 'budget',
+    list: ResourceSeries[],
+    loads: Map<Id, Map<IsoDate, Contribution[]>>,
+    range: { from: IsoDate; to: IsoDate },
+  ) => {
+    /*
+     * Der Rahmen kommt aus denselben Werten wie die Zeilen der Liste darüber -
+     * `personFigures`/`budgetFigures`. Bei Budgets gilt dabei: ist auch nur
+     * eines unbegrenzt, ist die Summe unbegrenzt (siehe addCeiling).
+     */
+    let ceiling: number | null;
+    if (kind === 'person') {
+      ceiling = list.reduce((sum, s) => sum + (personFigures.get(s.resourceId)?.available ?? 0), 0);
+    } else {
+      const total = list.reduce(
+        (acc, s) => addCeiling(acc, budgetFigures.get(s.resourceId)?.approved ?? 0),
+        EMPTY_CEILING,
+      );
+      ceiling = ceilingValue(total);
+    }
+
+    onReport(
+      buildBreakdown(
+        list.map((s) => ({
+          resourceId: s.resourceId,
+          name: s.name,
+          daily: loads.get(s.resourceId) ?? new Map(),
+          ceiling:
+            kind === 'person'
+              ? (personFigures.get(s.resourceId)?.available ?? null)
+              : ((budgetFigures.get(s.resourceId)?.approved ?? 0) || null),
+        })),
+        {
+          label: kind === 'person' ? `Personal (${list.length})` : `Budgets (${list.length})`,
+          from: range.from,
+          to: range.to,
+          // Personentage statt FTE: über einen frei gewählten Zeitraum ist die
+          // Summe die Aussage, nicht ein Mittelwert.
+          unit: kind === 'person' ? 'PT' : 'EUR',
+          ceiling,
+        },
+      ),
+    );
+  };
 
   /*
    * Kennzahlen aller Zeilen in einem Durchgang. Die Tagessummen laufen über
@@ -761,6 +856,15 @@ function ResourceLists({
             {personSeriesList.length === 0 && <span className="faint">Noch keine Personen.</span>}
           </div>
           <PersonTotals seriesList={personSeriesList} figures={personFigures} />
+          <Button
+            size="sm"
+            block
+            disabled={personSeriesList.length === 0}
+            onClick={() => makeReport('person', personSeriesList, personLoads, personRange)}
+            title="Tabelle mit allen Einzelpositionen im gewählten Zeitraum - zum Ansehen und Kopieren"
+          >
+            Auswertung erzeugen
+          </Button>
         </div>
         <div className="editor__section">
           <div className="editor__section-title">Budgets ({client.budgets.length})</div>
@@ -776,6 +880,15 @@ function ResourceLists({
             {budgetSeriesList.length === 0 && <span className="faint">Noch keine Budgets.</span>}
           </div>
           <BudgetTotals seriesList={budgetSeriesList} figures={budgetFigures} />
+          <Button
+            size="sm"
+            block
+            disabled={budgetSeriesList.length === 0}
+            onClick={() => makeReport('budget', budgetSeriesList, budgetLoads, budgetRange)}
+            title="Tabelle mit allen Einzelpositionen im gewählten Zeitraum - zum Ansehen und Kopieren"
+          >
+            Auswertung erzeugen
+          </Button>
         </div>
         <div className="editor__section">
           <div className="editor__section-title">Ungetrackte Bedingungen ({client.conditions.length})</div>

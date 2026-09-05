@@ -168,7 +168,7 @@ werden (`fill: none` an Kanten), sonst füllt das Bild sie schwarz aus.
 | `PanelWindow.tsx`                                   | Eine der beiden Ansichten in einem eigenen Browserfenster (Portal, dieselbe Instanz). `DetachButton` steht **ganz rechts** in beiden Werkzeugleisten. |
 | `Sidebar.tsx` / `TopBar.tsx` / `CommandPalette.tsx` | Rahmen der Anwendung.                                                                                |
 | `tasks/`                                            | Aufgabenübersicht: `NetworkChart` (inkl. Notizkacheln), `GanttChart`, `ResourceRailLayer`, `TaskEditor`. |
-| `resources/`                                        | Ressourcenübersicht: `ResourceChart`, `ResourceTable`, `ResourceEditors`.                            |
+| `resources/`                                        | Ressourcenübersicht: `ResourceChart`, `ResourceTable`, `ResourceEditors`, `ResourceBreakdown` (Auswertung). |
 | `dialogs/`                                          | Checkpoint-Verlauf, KI-Austausch, Warnzentrum, Tag-Verwaltung, Auslastung ("Wer arbeitet woran?"), Kurzanleitung. |
 | `ErrorBoundary.tsx`                                 | Verhindert den weißen Bildschirm bei unerwarteten Zuständen.                                         |
 
@@ -314,7 +314,7 @@ Die Version wird an **genau einer Stelle** gepflegt: `version` in `package.json`
 ```bash
 # 1. Version in package.json anheben, Änderung committen
 # 2. Tag setzen und pushen
-git tag v1.5.0 && git push origin v1.5.0
+git tag v1.6.0 && git push origin v1.6.0
 ```
 
 Der Workflow `.github/workflows/build.yml` veröffentlicht **nur** bei einem Tag

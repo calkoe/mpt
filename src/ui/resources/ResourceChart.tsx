@@ -14,7 +14,7 @@
  */
 import { useMemo, useState, type RefObject } from 'react';
 import type { Id } from '../../model/types';
-import { formatValue, type ResourceSeries } from '../../engine/resources';
+import { breakdownOfPoint, formatValue, type Breakdown, type ResourceSeries } from '../../engine/resources';
 import { diffDays, formatDateDe, today } from '../../engine/dates';
 import { utilisationState } from '../../engine/validate';
 import { useElementSize } from '../components/useElementSize';
@@ -44,6 +44,7 @@ export function ResourceChart({
   onHoverPoint,
   plotRef,
   axesRef,
+  onAnalyse,
 }: {
   series: ResourceSeries;
   onSelectTask?: (taskId: Id) => void;
@@ -64,6 +65,16 @@ export function ResourceChart({
    */
   plotRef?: RefObject<SVGSVGElement>;
   axesRef?: RefObject<SVGSVGElement>;
+  /**
+   * Klick auf einen Zeitraum meldet dessen Auswertung nach oben; dort öffnet
+   * sie denselben Dialog wie der Knopf "Auswertung erzeugen".
+   *
+   * Nur in der Detailansicht gesetzt: in der Übersicht ist eine Kachel 460
+   * Pixel breit und zeigt über hundert Zeiträume - dort trifft man keinen
+   * bestimmten, und der Klick auf die Kachel öffnet ohnehin genau diese
+   * Detailansicht.
+   */
+  onAnalyse?: (breakdown: Breakdown) => void;
 }) {
   const [hover, setHover] = useState<number | null>(null);
 
@@ -204,7 +215,21 @@ export function ResourceChart({
             let actualCursor = 0;
 
             return (
-              <g key={point.bucket.key} onMouseEnter={() => enter(index)} onMouseLeave={leave}>
+              <g
+                key={point.bucket.key}
+                className={onAnalyse ? 'chart__bucket chart__bucket--pickable' : 'chart__bucket'}
+                onMouseEnter={() => enter(index)}
+                onMouseLeave={leave}
+                onClick={
+                  onAnalyse
+                    ? (event) => {
+                        // Sonst öffnete der Klick zusätzlich die Kachel.
+                        event.stopPropagation();
+                        onAnalyse(breakdownOfPoint(series, point));
+                      }
+                    : undefined
+                }
+              >
                 {/*
                   **Ein** Tooltip je Zeitraum, an der Gruppe statt an jedem
                   Segment. Ein `<title>` gilt für das Element samt allem
@@ -250,7 +275,9 @@ export function ResourceChart({
                       height={segmentHeight}
                       fill={taskColorOf(taskColors, part.taskId)}
                       opacity={isBudget ? 0.4 : 1}
-                      onClick={() => onSelectTask?.(part.taskId)}
+                      /* Mit Auswertung gewinnt der Zeitraum: der Sprung zur
+                         Aufgabe steht dann in der Tabelle darunter. */
+                      onClick={onAnalyse ? undefined : () => onSelectTask?.(part.taskId)}
                     />
                   );
                 })}
@@ -272,7 +299,7 @@ export function ResourceChart({
                         width={actualWidth}
                         height={segmentHeight}
                         fill={taskColorOf(taskColors, part.taskId)}
-                        onClick={() => onSelectTask?.(part.taskId)}
+                        onClick={onAnalyse ? undefined : () => onSelectTask?.(part.taskId)}
                       />
                     );
                   })}
@@ -392,6 +419,10 @@ export function ResourceChart({
         Unter dem Diagramm entweder die Aufteilung des überfahrenen Zeitraums
         oder - solange nichts überfahren wird - die Legende. Beides in
         derselben Zeile, damit die Farbzuordnung immer sichtbar ist.
+
+        Beim Überfahren ist das eine flüchtige Auskunft; wer sie in Ruhe lesen
+        oder eine Zeile anklicken will, klickt den Zeitraum an - dann steht die
+        Auswertung als Tabelle darunter (siehe unten).
       */}
       <div className="reschart__legend">
         {hovered ? (
@@ -435,6 +466,7 @@ export function ResourceChart({
             ))
         )}
       </div>
+
     </div>
   );
 }

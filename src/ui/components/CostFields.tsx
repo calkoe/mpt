@@ -12,11 +12,23 @@
  * geplanten Betrag anteilig auf den Abruf um (0-100 %), das Feld daneben nimmt
  * einen genauen Euro-Betrag entgegen - beides schreibt auf dasselbe Feld.
  */
-import { COST_INTERVAL_LABEL, type CostInterval, type CostItem, type IsoDate } from '../../model/types';
-import { costDueDates } from '../../engine/resources';
-import { formatDateDe } from '../../engine/dates';
-import { AmountInput, Button, NumberField, NumberSlider, Switch, TextInput } from './controls';
-import { MeasureLabel } from './CostMeasure';
+import {
+  COST_INTERVAL_LABEL,
+  type CostInterval,
+  type CostItem,
+  type IsoDate,
+} from "../../model/types";
+import { costDueDates } from "../../engine/resources";
+import { formatDateDe } from "../../engine/dates";
+import {
+  AmountInput,
+  Button,
+  NumberField,
+  NumberSlider,
+  Switch,
+  TextInput,
+} from "./controls";
+import { MeasureLabel } from "./CostMeasure";
 
 /** Anteil des geplanten Betrags, der bereits abgerufen ist. */
 function spentPercent(cost: CostItem): number {
@@ -37,7 +49,11 @@ export function CostFields({
   /** Laufzeit der Aufgabe - daraus ergeben sich die Fälligkeiten. */
   term?: { start: IsoDate; end: IsoDate; openEnded: boolean };
   /** Ändert genau diese Kostenposition. */
-  onEdit: (label: string, recipe: (cost: CostItem) => void, coalesceKey?: string) => void;
+  onEdit: (
+    label: string,
+    recipe: (cost: CostItem) => void,
+    coalesceKey?: string,
+  ) => void;
   onRemove: () => void;
 }) {
   /*
@@ -45,7 +61,8 @@ export function CostFields({
    * wann tatsächlich gebucht wird - das hängt am Aufgabenstart und am Raster.
    * Bei Dauerläufern wird die Liste gekappt: sie liefe zehn Jahre weiter.
    */
-  const dueDates = cost.recurring && term ? costDueDates(cost, term.start, term.end, 13) : [];
+  const dueDates =
+    cost.recurring && term ? costDueDates(cost, term.start, term.end, 13) : [];
   return (
     <div className="line-item">
       <div className="col">
@@ -55,7 +72,13 @@ export function CostFields({
           value={cost.label}
           placeholder="Bezeichnung"
           onChange={(label) =>
-            onEdit('Kostenposition bearbeitet', (c) => { c.label = label; }, `cost-label-${cost.id}`)
+            onEdit(
+              "Kostenposition bearbeitet",
+              (c) => {
+                c.label = label;
+              },
+              `cost-label-${cost.id}`,
+            )
           }
         />
 
@@ -66,7 +89,13 @@ export function CostFields({
           <AmountInput
             value={cost.amount}
             onChange={(amount) =>
-              onEdit('Betrag geändert', (c) => { c.amount = amount; }, `cost-amount-${cost.id}`)
+              onEdit(
+                "Betrag geändert",
+                (c) => {
+                  c.amount = amount;
+                },
+                `cost-amount-${cost.id}`,
+              )
             }
           />
 
@@ -76,13 +105,22 @@ export function CostFields({
           <AmountInput
             value={cost.actualAmount}
             onChange={(actualAmount) =>
-              onEdit('Abruf geändert', (c) => { c.actualAmount = actualAmount; }, `cost-actual-${cost.id}`)
+              onEdit(
+                "Abruf geändert",
+                (c) => {
+                  c.actualAmount = actualAmount;
+                },
+                `cost-actual-${cost.id}`,
+              )
             }
           />
 
           {/* Schieber legt den geplanten Betrag anteilig auf den Abruf um. */}
-          <span className="fieldgrid__label" title="Anteil des geplanten Betrags, der bereits abgerufen ist">
-            Anteil
+          <span
+            className="fieldgrid__label"
+            title="Anteil des geplanten Betrags, der bereits abgerufen ist"
+          >
+            Abgerufen
           </span>
           <NumberSlider
             compact
@@ -92,7 +130,13 @@ export function CostFields({
             value={spentPercent(cost)}
             format={(v) => `${v} %`}
             onChange={(value) =>
-              onEdit('Abruf geändert', (c) => { c.actualAmount = Math.round((c.amount * value) / 100); }, `cost-pct-${cost.id}`)
+              onEdit(
+                "Abruf geändert",
+                (c) => {
+                  c.actualAmount = Math.round((c.amount * value) / 100);
+                },
+                `cost-pct-${cost.id}`,
+              )
             }
           />
 
@@ -101,20 +145,30 @@ export function CostFields({
             checked={cost.recurring}
             label="wiederkehrend"
             title="Fällt am ersten Tag jedes Zeitraums an, solange die Aufgabe läuft"
-            onChange={(recurring) => onEdit('Kostenart geändert', (c) => { c.recurring = recurring; })}
+            onChange={(recurring) =>
+              onEdit("Kostenart geändert", (c) => {
+                c.recurring = recurring;
+              })
+            }
           />
 
           {cost.recurring && (
             <>
               <span className="fieldgrid__label">alle</span>
               <div className="row">
-                <div style={{ width: 56, flex: 'none' }}>
+                <div style={{ width: 56, flex: "none" }}>
                   <NumberField
                     value={cost.every}
                     min={1}
                     ariaLabel="Intervallfaktor"
                     onChange={(every) =>
-                      onEdit('Intervall geändert', (c) => { c.every = Math.max(1, Math.round(every) || 1); }, `cost-every-${cost.id}`)
+                      onEdit(
+                        "Intervall geändert",
+                        (c) => {
+                          c.every = Math.max(1, Math.round(every) || 1);
+                        },
+                        `cost-every-${cost.id}`,
+                      )
                     }
                   />
                 </div>
@@ -122,14 +176,18 @@ export function CostFields({
                   className="select grow"
                   value={cost.interval}
                   onChange={(e) =>
-                    onEdit('Intervall geändert', (c) => { c.interval = e.target.value as CostInterval; })
+                    onEdit("Intervall geändert", (c) => {
+                      c.interval = e.target.value as CostInterval;
+                    })
                   }
                 >
-                  {(Object.keys(COST_INTERVAL_LABEL) as CostInterval[]).map((interval) => (
-                    <option key={interval} value={interval}>
-                      {COST_INTERVAL_LABEL[interval]}
-                    </option>
-                  ))}
+                  {(Object.keys(COST_INTERVAL_LABEL) as CostInterval[]).map(
+                    (interval) => (
+                      <option key={interval} value={interval}>
+                        {COST_INTERVAL_LABEL[interval]}
+                      </option>
+                    ),
+                  )}
                 </select>
               </div>
             </>
@@ -139,7 +197,9 @@ export function CostFields({
         {dueDates.length > 0 && (
           <div className="duelist">
             <span className="duelist__title">
-              {cost.recurring ? `Abrufe ab ${formatDateDe(dueDates[0])}` : 'Abruf'}
+              {cost.recurring
+                ? `Abrufe ab ${formatDateDe(dueDates[0])}`
+                : "Abruf"}
             </span>
             <div className="duelist__items">
               {dueDates.slice(0, 12).map((date) => (
@@ -148,7 +208,10 @@ export function CostFields({
                 </span>
               ))}
               {(dueDates.length > 12 || term?.openEnded) && (
-                <span className="duelist__item duelist__item--more" title="Läuft weiter, solange die Aufgabe läuft">
+                <span
+                  className="duelist__item duelist__item--more"
+                  title="Läuft weiter, solange die Aufgabe läuft"
+                >
                   …
                 </span>
               )}
@@ -160,11 +223,24 @@ export function CostFields({
           className="input--note"
           value={cost.note}
           placeholder="Notiz - Bestellnummer, Stand der Abrechnung..."
-          onChange={(note) => onEdit('Notiz geändert', (c) => { c.note = note; }, `cost-note-${cost.id}`)}
+          onChange={(note) =>
+            onEdit(
+              "Notiz geändert",
+              (c) => {
+                c.note = note;
+              },
+              `cost-note-${cost.id}`,
+            )
+          }
         />
       </div>
 
-      <Button variant="ghost" icon title="Kostenposition entfernen" onClick={onRemove}>
+      <Button
+        variant="ghost"
+        icon
+        title="Kostenposition entfernen"
+        onClick={onRemove}
+      >
         &times;
       </Button>
     </div>
