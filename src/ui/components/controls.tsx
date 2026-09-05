@@ -18,6 +18,7 @@ import {
   type ReactNode,
 } from 'react';
 import { isPlausibleIso, MAX_YEAR, MIN_YEAR } from '../../engine/dates';
+import { documentOf } from './ownerWindow';
 
 // ---------------------------------------------------------------------------
 // Button
@@ -297,21 +298,45 @@ export function TextArea({
   onChange,
   placeholder,
   rows = 3,
+  className = 'textarea',
+  autoFocus = false,
+  onBlur,
+  commitIf,
 }: {
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
   rows?: number;
+  /** Für Sonderfälle wie die Notizkachel im Netzplan. */
+  className?: string;
+  autoFocus?: boolean;
+  /**
+   * Läuft **nach** der Übernahme des Werts und bekommt ihn mitgeliefert. Ein
+   * Blick in den Datenbestand hilft an dieser Stelle nicht: die Übernahme ist
+   * eine Zustandsänderung und dort erst im nächsten Render zu sehen.
+   */
+  onBlur?: (value: string) => void;
+  /**
+   * Hält Zwischenstände zurück, die nicht in den Bestand sollen. Die Notiz im
+   * Netzplan nutzt das: leer geschrieben heisst gelöscht, und ein leerer
+   * Zwischenstand im Verlauf machte daraus zwei Schritte statt einem.
+   */
+  commitIf?: (value: string) => boolean;
 }) {
-  const text = useDeferredCommit(value, onChange, COMMIT_DELAY_MS);
+  const text = useDeferredCommit(value, onChange, COMMIT_DELAY_MS, commitIf);
   return (
     <textarea
-      className="textarea"
+      className={className}
       rows={rows}
+      // eslint-disable-next-line jsx-a11y/no-autofocus
+      autoFocus={autoFocus}
       value={text.draft}
       placeholder={placeholder}
       onChange={(e) => text.set(e.target.value)}
-      onBlur={text.flush}
+      onBlur={(e) => {
+        text.flush();
+        onBlur?.(e.target.value);
+      }}
     />
   );
 }
@@ -639,11 +664,13 @@ export function Combobox({
 
   useEffect(() => {
     if (!open) return;
+    // Dokument des Feldes, nicht das globale - siehe ownerWindow.ts.
+    const doc = documentOf(containerRef.current);
     const onDocClick = (event: MouseEvent) => {
       if (!containerRef.current?.contains(event.target as Node)) setOpen(false);
     };
-    document.addEventListener('mousedown', onDocClick);
-    return () => document.removeEventListener('mousedown', onDocClick);
+    doc.addEventListener('mousedown', onDocClick);
+    return () => doc.removeEventListener('mousedown', onDocClick);
   }, [open]);
 
   const choose = (index: number) => {
@@ -890,9 +917,10 @@ export function Modal({
         onClose();
       }
     };
-    document.addEventListener('keydown', onKey);
+    const doc = documentOf(ref.current);
+    doc.addEventListener('keydown', onKey);
     ref.current?.querySelector<HTMLElement>('input, button, textarea, select')?.focus();
-    return () => document.removeEventListener('keydown', onKey);
+    return () => doc.removeEventListener('keydown', onKey);
   }, [onClose]);
 
   return (

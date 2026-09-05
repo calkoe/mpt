@@ -3,7 +3,7 @@
  * Oben die überlagerten Ganglinien (oder die Tabelle mit Jahressummen),
  * darunter die Ressourcenlisten und der Editor der gewählten Ressource.
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createBudget, createCondition, createPerson } from '../../model/factory';
 import { BUDGET_KIND_LABEL, type BudgetKind, type Id, type IsoDate } from '../../model/types';
 import {
@@ -50,12 +50,14 @@ import { Button, EmptyState, Segmented, Switch, TextInput } from '../components/
 import { SplitStack } from '../components/SplitStack';
 import { buildTaskColors } from '../components/taskPalette';
 import { ZoomControls } from '../components/ChartToolbar';
+import { ExportPngButton } from '../components/ExportPngButton';
+import { DetachButton } from '../PanelWindow';
 import { useChartZoom } from '../components/useChartZoom';
 import { useElementSize } from '../components/useElementSize';
 import { moveItem, useReorder } from '../components/useReorder';
 import { TagFilter } from '../components/TagFilter';
 import { PeriodPicker } from '../components/PeriodPicker';
-import { ResourceChart } from './ResourceChart';
+import { RESCHART_AXES_FIT, ResourceChart } from './ResourceChart';
 import { ResourceTable } from './ResourceTable';
 import { BudgetEditor, PersonEditor, ResourceEditorHeader } from './ResourceEditors';
 
@@ -218,6 +220,14 @@ export function ResourceOverview() {
   // Feste Farbe je Aufgabe fuer die gestapelten Balken - siehe taskPalette.
   const taskColors = useMemo(() => buildTaskColors(client.tasks), [client.tasks]);
 
+  /*
+   * Zeichenflaeche und mitgefuehrte Achsen der Detailansicht. Sie liegen hier
+   * und nicht in der Kachel, weil der PNG-Knopf oben in der Werkzeugleiste
+   * sitzt - in der Detailansicht gibt es genau eine Kachel, die sie fuellt.
+   */
+  const detailPlotRef = useRef<SVGSVGElement>(null);
+  const detailAxesRef = useRef<SVGSVGElement>(null);
+
   const charts = (
     <div className="panel">
         <div className="panel__head">
@@ -287,17 +297,43 @@ export function ResourceOverview() {
               onChange={setSearch}
             />
           </div>
-          {/* Dieselben Knoepfe wie im Netzplan und im Gantt - siehe ChartToolbar. */}
-          <ZoomControls
-            fitTitle="Gesamten Zeitraum wieder über die volle Breite zeigen"
-            zoom={{
-              scale: chartZoom.zoom,
-              zoomBy: chartZoom.zoomBy,
-              fit: chartZoom.fit,
-              adjusted: chartZoom.userAdjusted,
-            }}
-          />
+          {/*
+            Dieselben Knoepfe wie im Netzplan und im Gantt, und im selben
+            abgesetzten Block: dort schiebt `ChartToolbar` sie per Portal in
+            diesen Platzhalter, hier kennt die Ansicht ihre Zoomstufe selbst -
+            aussehen soll es trotzdem gleich.
+
+            Der PNG-Knopf erscheint erst in der Detailansicht: in der Übersicht
+            stehen mehrere Diagramme nebeneinander, und ein Knopf in der Leiste
+            liesse offen, welches gemeint ist. Sobald genau eines die Fläche
+            füllt, ist es eindeutig - und der Knopf steht an derselben Stelle
+            wie im Netzplan und im Gantt.
+          */}
+          <div className="row chart-toolbar">
+            <ZoomControls
+              fitTitle="Gesamten Zeitraum wieder über die volle Breite zeigen"
+              zoom={{
+                scale: chartZoom.zoom,
+                zoomBy: chartZoom.zoomBy,
+                fit: chartZoom.fit,
+                adjusted: chartZoom.userAdjusted,
+              }}
+            />
+            {selectedId && prefs.resourceView === 'chart' && (
+              <ExportPngButton
+                svgRef={detailPlotRef}
+                overlayRef={detailAxesRef}
+                overlayFit={RESCHART_AXES_FIT}
+                namePrefix={`mpt-ganglinie-${shownSeries[0]?.name ?? 'ressource'}`}
+              />
+            )}
+          </div>
+
           <TagFilter tagIds={tagIds} onChange={setTagIds} title="Nur Ressourcen mit diesen Tags anzeigen" />
+
+          {/* Ganz rechts, in beiden Ansichten an derselben Stelle - er betrifft
+              nicht den Inhalt, sondern das Fenster. Siehe ui/PanelWindow.tsx. */}
+          <DetachButton mode="resources" />
         </div>
 
         <div className="panel__body" ref={chartBox.ref}>
@@ -337,6 +373,9 @@ export function ResourceOverview() {
                         taskLabel={taskLabel}
                         taskColors={taskColors}
                         zoom={chartZoom.zoom}
+                        /* Nur die eine Kachel der Detailansicht wird exportiert. */
+                        plotRef={selectedId ? detailPlotRef : undefined}
+                        axesRef={selectedId ? detailAxesRef : undefined}
                         onOpen={() => setUi({ selectedResourceId: series.resourceId })}
                         onSelectTask={(taskId) => {
                           const task = derived.taskById.get(taskId);
@@ -482,6 +521,8 @@ function SeriesCard({
   taskLabel,
   taskColors,
   zoom,
+  plotRef,
+  axesRef,
   onOpen,
   onSelectTask,
 }: {
@@ -489,6 +530,9 @@ function SeriesCard({
   taskLabel: (id: Id) => string;
   taskColors: Map<Id, string>;
   zoom: number;
+  /** Nur in der Detailansicht gesetzt - dann exportiert die Werkzeugleiste diese Kachel. */
+  plotRef?: React.RefObject<SVGSVGElement>;
+  axesRef?: React.RefObject<SVGSVGElement>;
   onOpen: () => void;
   onSelectTask: (taskId: Id) => void;
 }) {
@@ -543,6 +587,8 @@ function SeriesCard({
         zoom={zoom}
         onHoverPoint={setHovered}
         onSelectTask={onSelectTask}
+        plotRef={plotRef}
+        axesRef={axesRef}
       />
     </div>
   );

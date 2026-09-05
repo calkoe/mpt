@@ -97,6 +97,21 @@ h1, h2, h3, h4 {
   overflow: hidden;
 }
 
+/*
+ * Ausgelagertes Fenster (siehe ui/PanelWindow.tsx): darin steckt nur die
+ * Ansicht - kein Raster, keine Seitenleiste, keine Kopfzeile. `position: fixed`
+ * statt `height: 100%`, damit die Flaeche nicht davon abhaengt, ob das fremde
+ * Dokument eine durchgehende Hoehenkette mitbringt.
+ */
+.detached {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg);
+}
+
 .app__topbar { grid-area: topbar; }
 .app__notice { grid-area: notice; }
 .app__sidebar { grid-area: sidebar; }
@@ -273,6 +288,9 @@ h1, h2, h3, h4 {
   flex-direction: column;
   gap: var(--sp-2);
 }
+
+/* Im Seitenfuss sorgt bereits der Flex-Abstand fuer Luft um die Trennlinie. */
+.sidebar__footer .section-rule { margin: 0; }
 
 /* Vorhaben-Block */
 .venture {
@@ -931,6 +949,72 @@ h1, h2, h3, h4 {
 .node {
   cursor: pointer;
   transition: var(--transition);
+}
+
+/*
+ * Notizkachel im Netzplan. Bewusst eine andere Farbwelt als die Knoten - sie
+ * gehoert nicht zum Plan, sondern liegt darauf. Gezogen wird an der Leiste
+ * oben, geschrieben im Feld darunter; beides am selben Ort ginge nicht, ein
+ * Zeigerdruck kann nicht gleichzeitig Textmarke setzen und verschieben.
+ */
+.note__box {
+  fill: var(--note-bg);
+  stroke: var(--note-border);
+  stroke-width: 1;
+}
+
+.note__grip {
+  fill: var(--note-border);
+  cursor: grab;
+}
+
+.note__grip:active { cursor: grabbing; }
+
+/* Schriftgroesse und Zeilenhoehe stehen doppelt: hier fuer die Darstellung und
+   als NOTE_FONT/NOTE_LINE_HEIGHT in NetworkChart.tsx fuer den Umbruch. Sie
+   muessen uebereinstimmen, sonst bricht der Text an falscher Stelle um. */
+.note__text {
+  fill: var(--text);
+  font-size: 12px;
+  pointer-events: none;
+  white-space: pre;
+}
+
+/*
+ * Angezeigter Text und Eingabefeld muessen **gleich fett** wirken, sonst
+ * springt die Schrift beim Hineinklicken.
+ *
+ * Die Anwendung stellt global `-webkit-font-smoothing: antialiased`, was
+ * duenner zeichnet. Chrome wendet das auf SVG-Text nicht an, Safari schon -
+ * eine Angabe nur am Eingabefeld passt deshalb immer nur in einem der beiden
+ * Browser. Beide Seiten bekommen hier darum ausdruecklich die unveraenderte
+ * Rasterung, unabhaengig davon, wie der Browser die geerbte Angabe behandelt.
+ */
+.note__text,
+.note__input {
+  -webkit-font-smoothing: auto;
+}
+
+/* Faengt Klicks auch neben kurzem Text ab - sonst traefe man nur die Zeilen. */
+.note__hit {
+  fill: transparent;
+  cursor: text;
+}
+
+.note__input {
+  width: 100%;
+  height: 100%;
+  resize: none;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  line-height: 15px;
+  /* Ohne Innenabstand: die Lage bestimmt das foreignObject, damit der Text
+     beim Wechsel zwischen Anzeigen und Bearbeiten nicht springt. */
+  padding: 0;
 }
 
 /*

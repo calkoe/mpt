@@ -14,7 +14,8 @@ import { TaskOverview } from './ui/tasks/TaskOverview';
 import { ResourceOverview } from './ui/resources/ResourceOverview';
 import { GuideDialog } from './ui/dialogs/GuideDialog';
 import { WarningCenter } from './ui/dialogs/WarningCenter';
-import { useStore } from './state/store';
+import { DetachProvider, PanelWindow, useDetachState } from './ui/PanelWindow';
+import { useStore, type ViewMode } from './state/store';
 import { usePreferences } from './state/preferences';
 import { createTask, createVenture, duplicateTask } from './model/factory';
 import { isFileSystemAccessSupported, recallHandle } from './persistence/fileStore';
@@ -27,6 +28,12 @@ export function App() {
   const { prefs, setPrefs } = usePreferences();
   const [overlay, setOverlay] = useState<Overlay | null>(null);
   const [recalled, setRecalled] = useState<FileSystemFileHandle | null>(null);
+  /*
+   * Ansicht in einem eigenen Fenster. Der Zustand liegt hier, weil der Knopf
+   * unten in den Werkzeugleisten sitzt, das Fenster aber den ganzen rechten
+   * Bereich aufnimmt - siehe ui/PanelWindow.tsx.
+   */
+  const detach = useDetachState();
 
   // Nur für den einmaligen Blick beim Start - siehe unten.
   const prefsRef = useRef(prefs);
@@ -59,12 +66,27 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const isTyping = () => {
-    const el = document.activeElement;
-    if (!el) return false;
+  /*
+   * Wird gerade Text eingegeben? Gefragt wird das Ziel des Ereignisses, nicht
+   * `document.activeElement`: derselbe Handler laeuft auch im ausgelagerten
+   * Fenster, und dort zeigte das Hauptdokument auf ein ganz anderes Element.
+   */
+  const isTyping = (event: KeyboardEvent) => {
+    const el = event.target as HTMLElement | null;
+    if (!el || !el.tagName) return false;
     const tag = el.tagName.toLowerCase();
-    return tag === 'input' || tag === 'textarea' || tag === 'select' || (el as HTMLElement).isContentEditable;
+    return tag === 'input' || tag === 'textarea' || tag === 'select' || el.isContentEditable;
   };
+
+  /*
+   * Overlays liegen immer im Hauptfenster. Kommt das Kürzel aus der
+   * ausgelagerten Ansicht, wird das Hauptfenster mit nach vorn geholt - sonst
+   * ginge die Befehlspalette hinter dem zweiten Fenster auf.
+   */
+  const openOverlay = useCallback((next: Overlay) => {
+    setOverlay(next);
+    window.focus();
+  }, []);
 
   const onKeyDown = useCallback(
     (event: KeyboardEvent) => {
@@ -72,7 +94,7 @@ export function App() {
 
       if (mod && event.key.toLowerCase() === 'k') {
         event.preventDefault();
-        setOverlay('palette');
+        openOverlay('palette');
         return;
       }
       if (mod && event.key.toLowerCase() === 'z' && !event.shiftKey) {
@@ -100,7 +122,7 @@ export function App() {
        * Zwischenablage: die Aufgabe wird als Objekt uebernommen, nicht als
        * Text, und Kopieren in einem Textfeld soll weiterhin Text kopieren.
        */
-      if (mod && event.key.toLowerCase() === 'c' && !isTyping() && store.ui.selectedTaskId) {
+      if (mod && event.key.toLowerCase() === 'c' && !isTyping(event) && store.ui.selectedTaskId) {
         const task = store.client.tasks.find((t) => t.id === store.ui.selectedTaskId);
         if (task) {
           event.preventDefault();
@@ -108,7 +130,7 @@ export function App() {
         }
         return;
       }
-      if (mod && event.key.toLowerCase() === 'v' && !isTyping() && clipboard.current) {
+      if (mod && event.key.toLowerCase() === 'v' && !isTyping(event) && clipboard.current) {
         const source = store.client.tasks.find((t) => t.id === clipboard.current);
         if (!source) return;
         event.preventDefault();
@@ -122,7 +144,7 @@ export function App() {
         return;
       }
 
-      if (!event.altKey || isTyping()) return;
+      if (!event.altKey || isTyping(event)) return;
 
       switch (event.key.toLowerCase()) {
         // Alt+1..4 springen direkt in die vier gängigen Ansichten.
@@ -153,11 +175,11 @@ export function App() {
           break;
         case 'w':
           event.preventDefault();
-          setOverlay('warnings');
+          openOverlay('warnings');
           break;
         case 'h':
           event.preventDefault();
-          setOverlay('guide');
+          openOverlay('guide');
           break;
         case 'n': {
           event.preventDefault();
@@ -181,7 +203,7 @@ export function App() {
         }
       }
     },
-    [prefs.taskView, setPrefs, store],
+    [openOverlay, prefs.taskView, setPrefs, store],
   );
 
   useEffect(() => {
@@ -191,35 +213,62 @@ export function App() {
 
   const closeOverlay = () => setOverlay(null);
 
-  return (
-    <div className="app">
-      <TopBar
-        onOpenPalette={() => setOverlay('palette')}
-        onOpenWarnings={() => setOverlay('warnings')}
-        onOpenGuide={() => setOverlay('guide')}
-        recalled={recalled}
-        onRecalledHandled={() => setRecalled(null)}
-      />
-      <BrowserNotice />
-      <Sidebar />
-      <main className="app__main main">
-        {store.ui.mode === 'tasks' ? <TaskOverview /> : <ResourceOverview />}
-      </main>
-      {overlay === 'palette' && <CommandPalette onClose={closeOverlay} />}
-      {overlay === 'warnings' && <WarningCenter onClose={closeOverlay} />}
-      {overlay === 'guide' && <GuideDialog onClose={closeOverlay} />}
+  /*
+   * Beide Fenster zeigen eine echte Ansicht. Das Hauptfenster folgt wie immer
+   * `ui.mode`; das ausgelagerte Fenster haelt seinen eigenen Modus. Beim
+   * Hinausgeben schaltet das Hauptfenster automatisch auf den anderen - siehe
+   * ui/PanelWindow.tsx.
+   */
+  const viewOf = (mode: ViewMode) => (mode === 'tasks' ? <TaskOverview /> : <ResourceOverview />);
 
-      {/*
-        Version und Projektlink klein unten rechts. Der Link ist die einzige
-        Ausnahme vom Grundsatz "keine externen Referenzen": er wird erst beim
-        Anklicken aufgerufen, nichts wird beim Laden nachgeladen.
-      */}
-      <div className="versiontag" title={`MPT Version ${APP_VERSION}`}>
-        <span className="mono">v{APP_VERSION}</span> ·{' '}
-        <a className="versiontag__link" href={PROJECT_URL} target="_blank" rel="noreferrer noopener">
-          GitHub
-        </a>
+  return (
+    <DetachProvider value={detach}>
+      <div className="app">
+        <TopBar
+          onOpenPalette={() => setOverlay('palette')}
+          onOpenWarnings={() => setOverlay('warnings')}
+          onOpenGuide={() => setOverlay('guide')}
+          recalled={recalled}
+          onRecalledHandled={() => setRecalled(null)}
+        />
+        <BrowserNotice />
+        <Sidebar />
+        <main className="app__main main">{viewOf(store.ui.mode)}</main>
+
+        {/*
+          Das zweite Fenster. Es rendert per Portal, hat also keinen Platz im
+          Raster; schliesst der Nutzer es von Hand, kommt seine Ansicht ins
+          Hauptfenster zurueck.
+        */}
+        {detach.detached && (
+          <PanelWindow
+            detached={detach.detached}
+            onClosed={() => {
+              const returning = detach.detached?.mode;
+              detach.forget();
+              if (returning) store.setUi({ mode: returning });
+            }}
+            onKeyDown={onKeyDown}
+          >
+            {viewOf(detach.detached.mode)}
+          </PanelWindow>
+        )}
+        {overlay === 'palette' && <CommandPalette onClose={closeOverlay} />}
+        {overlay === 'warnings' && <WarningCenter onClose={closeOverlay} />}
+        {overlay === 'guide' && <GuideDialog onClose={closeOverlay} />}
+
+        {/*
+          Version und Projektlink klein unten rechts. Der Link ist die einzige
+          Ausnahme vom Grundsatz "keine externen Referenzen": er wird erst beim
+          Anklicken aufgerufen, nichts wird beim Laden nachgeladen.
+        */}
+        <div className="versiontag" title={`MPT Version ${APP_VERSION}`}>
+          <span className="mono">v{APP_VERSION}</span> ·{' '}
+          <a className="versiontag__link" href={PROJECT_URL} target="_blank" rel="noreferrer noopener">
+            GitHub
+          </a>
+        </div>
       </div>
-    </div>
+    </DetachProvider>
   );
 }

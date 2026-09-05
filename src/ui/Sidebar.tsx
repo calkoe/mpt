@@ -14,6 +14,7 @@ import { useStore, type ViewMode } from '../state/store';
 import { Button, Combobox, ConfirmButton, Field, Segmented, TextInput } from './components/controls';
 import { TagDialog } from './dialogs/TagDialog';
 import { WorkloadDialog } from './dialogs/WorkloadDialog';
+import { useDetached } from './PanelWindow';
 import { moveItem, useReorder } from './components/useReorder';
 
 export function Sidebar() {
@@ -21,6 +22,7 @@ export function Sidebar() {
   const [clientMenuOpen, setClientMenuOpen] = useState(false);
   const [tagsOpen, setTagsOpen] = useState(false);
   const [workloadOpen, setWorkloadOpen] = useState(false);
+  const detached = useDetached();
 
   // Anzeigereihenfolge der Vorhaben = Array-Reihenfolge, per Ziehen aenderbar.
   /** Welches Vorhaben gerade seine Bearbeitungsfelder zeigt. */
@@ -270,27 +272,42 @@ export function Sidebar() {
 
       {/* Moduswechsel */}
       <div className="sidebar__footer">
+        {/*
+          Der Umschalter gilt für dieses Fenster. Läuft eine der beiden
+          Ansichten im eigenen Fenster, trägt sie hier ein ⧉ - sonst wüsste man
+          nicht, warum die Auswahl scheinbar nichts Neues zeigt.
+        */}
         <Segmented<ViewMode>
           block
           ariaLabel="Ansicht"
           value={ui.mode}
           onChange={(mode) => setUi({ mode })}
-          options={[
-            { value: 'tasks', label: 'Aufgaben', title: 'Aufgabenübersicht (Alt+1)' },
-            { value: 'resources', label: 'Ressourcen', title: 'Ressourcenübersicht (Alt+3)' },
-          ]}
+          options={([
+            ['tasks', 'Aufgaben', 'Aufgabenübersicht (Alt+1)'],
+            ['resources', 'Ressourcen', 'Ressourcenübersicht (Alt+3)'],
+          ] as const).map(([value, label, title]) => ({
+            value,
+            label: detached?.mode === value ? `${label} ⧉` : label,
+            title: detached?.mode === value ? `${title} - läuft gerade in einem eigenen Fenster` : title,
+          }))}
         />
-        <Button
-          block
-          variant="ghost"
-          onClick={() => setTagsOpen(true)}
-          title="Tags umbenennen, umfärben oder löschen"
-        >
+        {/*
+          Der Moduswechsel bestimmt, was rechts zu sehen ist; darunter stehen
+          Werkzeuge, die unabhängig davon wirken. Die feine Linie trennt beides
+          - ohne sie liest sich der Fuß als eine einzige Knopfreihe.
+        */}
+        <div className="section-rule" />
+
+        {/*
+          Beides sind Werkzeuge, keine Randnotizen - deshalb als richtige
+          Knöpfe mit Rahmen. Als flache Textzeilen ("ghost") sahen sie unter
+          dem Moduswechsel aus wie Beschriftungen und wurden übersehen.
+        */}
+        <Button block onClick={() => setTagsOpen(true)} title="Tags umbenennen, umfärben oder löschen">
           Tags verwalten ({client.tags.length})
         </Button>
         <Button
           block
-          variant="ghost"
           onClick={() => setWorkloadOpen(true)}
           title="Wer arbeitet in einem Zeitraum an welcher Aufgabe?"
         >

@@ -8,6 +8,7 @@ import {
   type ChecklistItem,
   type Client,
   type Condition,
+  type Note,
   type CostItem,
   type Database,
   type Id,
@@ -146,6 +147,19 @@ export function createCondition(name = 'Neue Bedingung'): Condition {
   return { id: newId('cnd'), name, met: false };
 }
 
+/**
+ * Neue Notiz an einer Stelle der Netzplanflaeche. Sie startet leer und wird
+ * sofort bearbeitet; bleibt sie leer, verschwindet sie wieder.
+ */
+export function createNote(x: number, y: number): Note {
+  return { id: newId('not'), text: '', x: Math.round(x), y: Math.round(y) };
+}
+
+/** Nur fuer den Beispielbestand: Notiz mit Text in einem Zug. */
+function createNoteWith(text: string, x: number, y: number): Note {
+  return { ...createNote(x, y), text };
+}
+
 export function createAssignment(personId: Id): PersonAssignment {
   return { id: newId('asg'), personId, mode: 'FTE', value: 0.5, periods: [] };
 }
@@ -173,7 +187,7 @@ export function createPeriodValue(value: number, from?: IsoDate, to?: IsoDate): 
 }
 
 export function createClient(name = 'Neuer Mandant'): Client {
-  return { id: newId('cli'), name, ventures: [], tasks: [], people: [], budgets: [], tags: [], conditions: [] };
+  return { id: newId('cli'), name, ventures: [], tasks: [], people: [], budgets: [], tags: [], conditions: [], notes: [] };
 }
 
 export function createDatabase(clients?: Client[]): Database {
@@ -280,6 +294,11 @@ export function createDemoClient(): Client {
   const datenschutz = createCondition('Datenschutzprüfung abgeschlossen');
   datenschutz.met = true;
   client.conditions = [freigabe, datenschutz];
+
+  client.notes = [
+    // Freie Stelle im Raster, direkt unter "Hardware beschaffen".
+    createNoteWith('Hardware braucht 6 Wochen Vorlauf – Angebot liegt beim Einkauf.', 318, 130),
+  ];
 
   // --- Aufgaben ----------------------------------------------------------
   const konzept = createTask(vPlanung.id, 'Grobkonzept erstellen', start);

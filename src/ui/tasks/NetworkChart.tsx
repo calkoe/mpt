@@ -23,7 +23,7 @@
  * Strg+C / Strg+V dupliziert die gewählte Aufgabe.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { Client, Id, Task } from '../../model/types';
+import type { Client, Id, Note, Task } from '../../model/types';
 import { checklistProgress, TASK_STATUS_LABEL } from '../../model/types';
 import {
   edgePath,
@@ -37,16 +37,17 @@ import {
 import { formatDateDe } from '../../engine/dates';
 import { formatDuration, wouldCreateCycle, type ScheduleResult } from '../../engine/schedule';
 import type { Warning } from '../../engine/validate';
-import { createFollowUp, createPredecessor } from '../../model/factory';
+import { createFollowUp, createNote, createPredecessor } from '../../model/factory';
 import { usePreferences } from '../../state/preferences';
 import { useStore } from '../../state/store';
 import { countRailBlocks, railHeight, ResourceRailLayer, type RailAnchor } from './ResourceRailLayer';
 import { useZoomPan } from '../components/useZoomPan';
-import { Button, ConfirmButton } from '../components/controls';
+import { Button, ConfirmButton, TextArea } from '../components/controls';
 import { ExportPngButton } from '../components/ExportPngButton';
 import { ChartToolbar, ZoomControls } from '../components/ChartToolbar';
 import { TagBadges } from './TagBadges';
-import { fitText, fontOf } from '../components/measureText';
+import { fitText, fontOf, wrapText } from '../components/measureText';
+import { windowOf } from '../components/ownerWindow';
 
 export function NetworkChart({
   client,
@@ -188,16 +189,53 @@ export function NetworkChart({
     [tasks, prefs.weighting, schedule],
   );
 
-  const focusSelected = () => {
-    const node = ui.selectedTaskId ? nodeById.get(ui.selectedTaskId) : undefined;
-    if (node) zoom.focusOn(node);
-  };
-
   // Zoomstufe als Ref: der Bewegungs-Handler soll nicht bei jeder Aenderung
   // neu gebaut werden.
   const scaleRef = useRef(zoom.scale);
   scaleRef.current = zoom.scale;
   const drag = useNodeDrag({ scaleRef, commitClient, onDragged: zoom.markAdjusted });
+  const noteDrag = useNoteDrag({ scaleRef, commitClient });
+
+  /** Notiz, in der gerade geschrieben wird. */
+  const [editingNote, setEditingNote] = useState<Id | null>(null);
+
+  /**
+   * Neue Notiz in der Mitte des sichtbaren Ausschnitts - dort, wo man gerade
+   * hinsieht. Am Rand der Zeichenfläche wäre sie erst einmal ausserhalb des
+   * Bildes und man müsste sie suchen.
+   */
+  const addNote = () => {
+    const box = container.current?.getBoundingClientRect();
+    const scale = Math.max(0.01, zoom.scale);
+    const x = ((box ? box.width / 2 : 400) - zoom.offsetX) / scale - NOTE_WIDTH / 2;
+    const y = ((box ? box.height / 2 : 300) - zoom.offsetY) / scale - NOTE_HEIGHT / 2;
+    const note = createNote(x, y);
+    /*
+     * Anlegen, Schreiben und ein etwaiges Verwerfen tragen denselben
+     * Zusammenfassungsschlüssel: eine neue Notiz zu schreiben ist **ein**
+     * Schritt im Verlauf, kein Dutzend.
+     */
+    commitClient('Notiz angelegt', (c) => {
+      c.notes.push(note);
+    }, { coalesceKey: `note-${note.id}` });
+    setEditingNote(note.id);
+  };
+
+  /**
+   * Leer geschrieben heisst gelöscht - ein eigener Löschknopf entfällt damit.
+   *
+   * Der Text kommt vom Feld selbst, nicht aus `client`: die Übernahme läuft
+   * unmittelbar davor über denselben Zustandswechsel und ist hier noch nicht
+   * zu sehen. Ohne Text wird auch nichts committet, sonst gälte die Datei
+   * schon als geändert, weil man eine Notiz nur angesehen hat.
+   */
+  const finishNote = (id: Id, text: string) => {
+    setEditingNote(null);
+    if (text.trim().length > 0) return;
+    commitClient('Notiz gelöscht', (c) => {
+      c.notes = c.notes.filter((n) => n.id !== id);
+    }, { coalesceKey: `note-${id}` });
+  };
 
   /** Verwirft alle Handverschiebungen und stellt das Auto-Layout wieder her. */
   const resetLayout = () =>
@@ -255,14 +293,15 @@ export function NetworkChart({
             },
           }}
         />
-        <Button
-          size="sm"
-          disabled={!ui.selectedTaskId || !nodeById.has(ui.selectedTaskId)}
-          onClick={focusSelected}
-          title="Auf die gewählte Aufgabe zoomen (auch per Doppelklick auf einen Knoten)"
-        >
-          Auf Auswahl
+        {/*
+          Notizen sind eine Eigenheit des Netzplans - im Gantt gibt es keine
+          freie Fläche, auf der sie stehen könnten. Deshalb steht der Knopf hier
+          und nicht in der Werkzeugleiste der Aufgabenansicht.
+        */}
+        <Button size="sm" onClick={addNote} title="Freie Notiz auf der Fläche ablegen">
+          + Notiz
         </Button>
+
         {/* Nur sichtbar, wenn es überhaupt etwas zurückzusetzen gibt. */}
         {hasManualLayout(client.tasks) && (
           <ConfirmButton
@@ -379,9 +418,231 @@ export function NetworkChart({
             />
           ))}
 
+          {/*
+            Notizen zuletzt: sie liegen frei auf der Fläche und sollen nicht
+            hinter einem Knoten verschwinden, wenn man sie dorthin zieht.
+          */}
+          {client.notes.map((note) => (
+            <NoteView
+              key={note.id}
+              note={note}
+              editing={editingNote === note.id}
+              onEdit={() => setEditingNote(note.id)}
+              onChange={(text) =>
+                commitClient('Notiz geändert', (c) => {
+                  const target = c.notes.find((n) => n.id === note.id);
+                  if (target) target.text = text;
+                }, { coalesceKey: `note-${note.id}` })
+              }
+              onDone={(text) => finishNote(note.id, text)}
+              onDragStart={(event) => noteDrag.start(event, note)}
+            />
+          ))}
         </g>
       </svg>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Notizkacheln
+// ---------------------------------------------------------------------------
+
+/**
+ * Ziehen einer Notiz. Anders als ein Knoten hat sie keine berechnete Position,
+ * die als Bezug dient - gespeichert wird deshalb die Lage selbst, nicht ein
+ * Versatz.
+ */
+function useNoteDrag({
+  scaleRef,
+  commitClient,
+}: {
+  scaleRef: React.MutableRefObject<number>;
+  commitClient: ReturnType<typeof useStore>['commitClient'];
+}) {
+  const start = (event: React.PointerEvent, note: Note) => {
+    if (event.button !== 0) return;
+    event.stopPropagation();
+    /*
+     * Verhindert den Fokuswechsel, den ein Zeigerdruck sonst auslöst. Ohne das
+     * verlöre eine gerade angelegte Notiz beim Anfassen der Griffleiste den
+     * Fokus - und weil sie noch leer ist, wäre sie damit gelöscht, bevor man
+     * sie an ihren Platz schieben konnte.
+     */
+    event.preventDefault();
+
+    const element = (event.currentTarget as Element).closest('[data-note]');
+    const originX = event.clientX;
+    const originY = event.clientY;
+    let dx = 0;
+    let dy = 0;
+    let moved = false;
+    let frame = 0;
+
+    // Fenster und Bildtakt des angefassten Elements - siehe ownerWindow.ts.
+    const view = windowOf(event.currentTarget);
+
+    const paint = () => {
+      frame = 0;
+      element?.setAttribute('transform', `translate(${note.x + dx},${note.y + dy})`);
+    };
+
+    const move = (e: PointerEvent) => {
+      const scale = Math.max(0.01, scaleRef.current);
+      dx = (e.clientX - originX) / scale;
+      dy = (e.clientY - originY) / scale;
+      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) moved = true;
+      if (!frame) frame = view.requestAnimationFrame(paint);
+    };
+
+    const end = () => {
+      view.removeEventListener('pointermove', move);
+      view.removeEventListener('pointerup', end);
+      if (frame) view.cancelAnimationFrame(frame);
+      if (!moved) return;
+
+      commitClient('Notiz verschoben', (c) => {
+        const target = c.notes.find((n) => n.id === note.id);
+        if (!target) return;
+        target.x = Math.round(note.x + dx);
+        target.y = Math.round(note.y + dy);
+      });
+    };
+
+    view.addEventListener('pointermove', move);
+    view.addEventListener('pointerup', end);
+  };
+
+  return { start };
+}
+
+/*
+ * Genau so gross wie ein Knoten: Notizen liegen dadurch im selben Raster und
+ * ragen nicht in die Ressourcenleiste darunter. Unterschieden werden sie ueber
+ * die Farbe, nicht ueber die Form.
+ */
+const NOTE_WIDTH = NODE_WIDTH;
+const NOTE_HEIGHT = NODE_HEIGHT;
+/** Griffleiste oben: dort wird gezogen, im Rest wird geschrieben. */
+const NOTE_GRIP = 14;
+/** Seitlicher Einzug des Textes - in beiden Zustaenden derselbe. */
+const NOTE_PADDING = 8;
+const NOTE_LINE_HEIGHT = 15;
+const NOTE_FONT = '12px';
+/** Oberkante der ersten Zeilenschachtel, gemessen vom Kachelrand. */
+const NOTE_TEXT_TOP = NOTE_GRIP + 4;
+/**
+ * Abstand von der Oberkante einer Zeilenschachtel zur Schriftlinie.
+ *
+ * HTML setzt Text ueber Zeilenhoehe und Schriftmetrik, SVG ueber die
+ * Schriftlinie. Ohne diesen Ausgleich stuende der Text beim Bearbeiten tiefer
+ * als danach - die Notiz zuckte bei jedem Klick. In Chrome mit Inter 12px auf
+ * 15px Zeilenhoehe nachgemessen.
+ */
+const NOTE_BASELINE = 12;
+const NOTE_LINES = Math.floor((NOTE_HEIGHT - NOTE_TEXT_TOP - 2) / NOTE_LINE_HEIGHT);
+
+/**
+ * Freie Notiz auf der Fläche.
+ *
+ * Zwei Zustände statt eines: angezeigt wird sie als SVG-Text, geschrieben wird
+ * in einem echten Textfeld (`foreignObject`). Ein dauerhaftes Textfeld wäre
+ * einfacher gewesen, käme aber im PNG-Export nicht mit - dort wird das SVG
+ * serialisiert, und HTML darin verliert alle Stile.
+ *
+ * Gezogen wird an der Leiste oben, geschrieben im Feld darunter. Beides am
+ * selben Ort ginge nicht: ein Zeigerdruck kann nicht gleichzeitig Textmarke
+ * setzen und die Kachel verschieben.
+ */
+function NoteView({
+  note,
+  editing,
+  onEdit,
+  onChange,
+  onDone,
+  onDragStart,
+}: {
+  note: Note;
+  editing: boolean;
+  onEdit: () => void;
+  onChange: (text: string) => void;
+  /** Bearbeitung beendet - leer heisst gelöscht. */
+  onDone: (text: string) => void;
+  onDragStart: (event: React.PointerEvent) => void;
+}) {
+  const lines = useMemo(
+    () => wrapText(note.text, NOTE_WIDTH - NOTE_PADDING * 2, fontOf(NOTE_FONT), NOTE_LINES),
+    [note.text],
+  );
+
+  return (
+    <g className="note" transform={`translate(${note.x},${note.y})`} data-note={note.id}>
+      <rect className="note__box" width={NOTE_WIDTH} height={NOTE_HEIGHT} rx={6} ry={6} />
+
+      {/* Griffleiste - der einzige Ort, an dem gezogen wird. */}
+      <rect
+        className="note__grip"
+        width={NOTE_WIDTH}
+        height={NOTE_GRIP}
+        rx={6}
+        ry={6}
+        onPointerDown={onDragStart}
+      >
+        <title>Ziehen zum Verschieben</title>
+      </rect>
+
+      {editing ? (
+        /*
+          Genau dort, wo auch der angezeigte Text steht: gleicher Einzug links,
+          gleiche Oberkante der ersten Zeile. Das Feld selbst hat deshalb
+          keinen Innenabstand (siehe .note__input).
+        */
+        <foreignObject
+          x={NOTE_PADDING}
+          y={NOTE_TEXT_TOP}
+          width={NOTE_WIDTH - NOTE_PADDING * 2}
+          height={NOTE_HEIGHT - NOTE_TEXT_TOP - 2}
+          /*
+            Der Zeigerdruck bleibt im Feld. Sonst erreicht er die Zeichenfläche
+            darunter, die daraufhin zu schieben beginnt - und statt Text zu
+            markieren, verschiebt man den ganzen Plan.
+          */
+          onPointerDown={(e) => e.stopPropagation()}
+        >
+          <TextArea
+            className="note__input"
+            autoFocus
+            value={note.text}
+            placeholder="Notiz… (leer lassen zum Löschen)"
+            onChange={onChange}
+            /* Leer wird nie zwischengespeichert - siehe onDone. */
+            commitIf={(text) => text.trim().length > 0}
+            onBlur={onDone}
+          />
+        </foreignObject>
+      ) : (
+        <text className="note__text" onClick={onEdit}>
+          {lines.map((line, index) => (
+            <tspan key={index} x={NOTE_PADDING} y={NOTE_TEXT_TOP + NOTE_BASELINE + index * NOTE_LINE_HEIGHT}>
+              {line}
+            </tspan>
+          ))}
+          <title>Klicken zum Bearbeiten</title>
+        </text>
+      )}
+
+      {/* Auch die leere Fläche unter kurzem Text öffnet die Bearbeitung. */}
+      {!editing && (
+        <rect
+          className="note__hit"
+          y={NOTE_GRIP}
+          width={NOTE_WIDTH}
+          height={NOTE_HEIGHT - NOTE_GRIP}
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={onEdit}
+        />
+      )}
+    </g>
   );
 }
 
@@ -685,6 +946,14 @@ function useNodeDrag({
     let moved = false;
     let frame = 0;
 
+    /*
+     * Fenster des angefassten Knotens - siehe components/ownerWindow.ts. Auch
+     * der Bildtakt kommt von dort: verdeckt das ausgelagerte Fenster das
+     * Hauptfenster, drosselt der Browser dessen `requestAnimationFrame` bis zum
+     * Stillstand, und die Vorschau bliebe unter dem Zeiger stehen.
+     */
+    const view = windowOf(event.currentTarget);
+
     const paint = () => {
       frame = 0;
       element?.setAttribute('transform', `translate(${node.x + dx},${node.y + dy})`);
@@ -696,13 +965,13 @@ function useNodeDrag({
       dy = (e.clientY - originY) / scale;
       if (Math.abs(dx) > 3 || Math.abs(dy) > 3) moved = true;
       // Höchstens ein Neuzeichnen je Bildaufbau.
-      if (!frame) frame = requestAnimationFrame(paint);
+      if (!frame) frame = view.requestAnimationFrame(paint);
     };
 
     const end = () => {
-      window.removeEventListener('pointermove', move);
-      window.removeEventListener('pointerup', end);
-      if (frame) cancelAnimationFrame(frame);
+      view.removeEventListener('pointermove', move);
+      view.removeEventListener('pointerup', end);
+      if (frame) view.cancelAnimationFrame(frame);
       if (!moved) return;
 
       onDragged();
@@ -718,8 +987,8 @@ function useNodeDrag({
       });
     };
 
-    window.addEventListener('pointermove', move);
-    window.addEventListener('pointerup', end);
+    view.addEventListener('pointermove', move);
+    view.addEventListener('pointerup', end);
   };
 
   return { start };

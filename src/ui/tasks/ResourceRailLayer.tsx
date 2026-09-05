@@ -35,7 +35,7 @@ export function railLayout(count: number, width: number, offsetX = 0) {
   const available = Math.max(MIN_BLOCK_WIDTH, width - offsetX - BLOCK_GAP);
   const perRow = Math.max(1, Math.floor(available / (MIN_BLOCK_WIDTH + BLOCK_GAP)));
   const rows = Math.max(1, Math.ceil(count / perRow));
-  const blockWidth = Math.max(MIN_BLOCK_WIDTH, Math.min(180, available / perRow - BLOCK_GAP));
+  const blockWidth = Math.max(MIN_BLOCK_WIDTH, Math.min(MAX_BLOCK_WIDTH, available / perRow - BLOCK_GAP));
   return { perRow, rows, blockWidth };
 }
 
@@ -80,7 +80,14 @@ const CONTENT_HEIGHT_PLAIN = 24;
 /** Obere Kante des Inhalts, wenn er oben ausgerichtet waere. */
 const CONTENT_TOP = 4;
 const BLOCK_GAP = 12;
-const MIN_BLOCK_WIDTH = 118;
+/*
+ * Breiter als zunaechst gedacht: in einen 118px-Block passten von
+ * "Betriebskostenbudget" gerade die ersten zwei Silben. Namen von Personen und
+ * Budgets sind in der Praxis lang, und ein Block, dessen Beschriftung immer
+ * abgeschnitten ist, beantwortet die Frage nicht, fuer die er da ist.
+ */
+const MIN_BLOCK_WIDTH = 158;
+const MAX_BLOCK_WIDTH = 230;
 /** Linke Kante des Textes - lässt Platz für das Symbol der Ressourcenart. */
 const TEXT_X = 30;
 /** Luft zwischen Text und rechter Blockkante. */

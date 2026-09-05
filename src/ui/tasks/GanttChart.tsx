@@ -43,6 +43,7 @@ import { formatDuration } from '../../engine/schedule';
 import { countRailBlocks, railHeight, ResourceRailLayer } from './ResourceRailLayer';
 import { TagBadges } from './TagBadges';
 import { fitText, fontOf } from '../components/measureText';
+import { windowOf } from '../components/ownerWindow';
 
 const ROW_HEIGHT = 26;
 /** Grenzen der ziehbaren Beschriftungsspalte. */
@@ -634,15 +635,17 @@ function useBarDrag({
       );
     };
 
+    // Fenster des angefassten Balkens - siehe components/ownerWindow.ts.
+    const view = windowOf(event.currentTarget);
     const end = () => {
-      window.removeEventListener('pointermove', move);
-      window.removeEventListener('pointerup', end);
+      view.removeEventListener('pointermove', move);
+      view.removeEventListener('pointerup', end);
       origin.current = null;
       setState(null);
     };
 
-    window.addEventListener('pointermove', move);
-    window.addEventListener('pointerup', end);
+    view.addEventListener('pointermove', move);
+    view.addEventListener('pointerup', end);
   };
 
   /**
@@ -676,13 +679,14 @@ function useColumnResize(current: number, apply: (width: number) => void) {
       if (!base) return;
       apply(Math.min(MAX_LABEL_WIDTH, Math.max(MIN_LABEL_WIDTH, base.width + (e.clientX - base.x))));
     };
+    const view = windowOf(event.currentTarget);
     const end = () => {
-      window.removeEventListener('pointermove', move);
-      window.removeEventListener('pointerup', end);
+      view.removeEventListener('pointermove', move);
+      view.removeEventListener('pointerup', end);
       origin.current = null;
     };
-    window.addEventListener('pointermove', move);
-    window.addEventListener('pointerup', end);
+    view.addEventListener('pointermove', move);
+    view.addEventListener('pointerup', end);
   };
 }
 

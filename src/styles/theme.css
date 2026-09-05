@@ -88,6 +88,10 @@
   --ok-soft: #e3f4ec;
   --info: #2b759b;
 
+  /* Notizkacheln im Netzplan - warm, damit sie sich vom Plan absetzen. */
+  --note-bg: #fdf6e3;
+  --note-border: #e6d9b4;
+
   /* Aufgabenstatus */
   --status-open: #8c93a1;
   --status-active: #3559d9;
@@ -147,6 +151,9 @@
   --ok: #52c69a;
   --ok-soft: #1c3830;
   --info: #6bb4d8;
+
+  --note-bg: #34301f;
+  --note-border: #4e4732;
 
   --status-open: #767e8d;
   --status-active: #6b8dff;

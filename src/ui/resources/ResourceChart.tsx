@@ -12,7 +12,7 @@
  * Die Höhe folgt der verfügbaren Fläche; Grenzwerte liegen als gestrichelte
  * Treppe darüber, Überschreitungen werden rot umrandet.
  */
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type RefObject } from 'react';
 import type { Id } from '../../model/types';
 import { formatValue, type ResourceSeries } from '../../engine/resources';
 import { diffDays, formatDateDe, today } from '../../engine/dates';
@@ -29,6 +29,12 @@ const MIN_BUCKET_WIDTH = 18;
 /** Nur als Rückfallwert, solange die Fläche noch nicht gemessen wurde. */
 const FALLBACK_HEIGHT = 150;
 
+/**
+ * Breite der beiden mitgeführten Achsenstreifen für den PNG-Export. Sie bleiben
+ * am Bildschirm stehen, das Bild ist aber breiter - siehe export/png.ts.
+ */
+export const RESCHART_AXES_FIT = { left: PADDING_LEFT, right: PADDING_RIGHT };
+
 export function ResourceChart({
   series,
   onSelectTask,
@@ -36,6 +42,8 @@ export function ResourceChart({
   taskColors,
   zoom,
   onHoverPoint,
+  plotRef,
+  axesRef,
 }: {
   series: ResourceSeries;
   onSelectTask?: (taskId: Id) => void;
@@ -49,6 +57,13 @@ export function ResourceChart({
    * Quartal?" ohnehin an, und im Diagramm selbst ist dafür kein Platz.
    */
   onHoverPoint?: (point: ResourceSeries['points'][number] | null) => void;
+  /**
+   * Zeichenfläche und mitgeführte Achsen. Sie liegen ausserhalb, weil der
+   * PNG-Knopf in der Kachelkopfzeile sitzt - das Diagramm selbst hat dort
+   * keinen Platz und würde ihn beim Scrollen ohnehin verlieren.
+   */
+  plotRef?: RefObject<SVGSVGElement>;
+  axesRef?: RefObject<SVGSVGElement>;
 }) {
   const [hover, setHover] = useState<number | null>(null);
 
@@ -155,7 +170,7 @@ export function ResourceChart({
   return (
     <div className="reschart">
       <div className="reschart__plot" ref={box.ref}>
-        <svg width={width} height={height} role="img" aria-label={`Ganglinie ${series.name}`}>
+        <svg ref={plotRef} width={width} height={height} role="img" aria-label={`Ganglinie ${series.name}`}>
           {/* Raster - die Beschriftung liegt in der mitgefuehrten Ebene. */}
           {ticks.map((tick, i) => (
             <line
@@ -309,7 +324,13 @@ export function ResourceChart({
           erst herscrollen muss, ist keine Skala. Umgesetzt ueber
           `position: sticky` - das erledigt der Compositor ohne JavaScript.
         */}
-        <svg className="reschart__axes" width={viewportWidth} height={height} style={{ marginTop: -height }}>
+        <svg
+          ref={axesRef}
+          className="reschart__axes"
+          width={viewportWidth}
+          height={height}
+          style={{ marginTop: -height }}
+        >
           <rect className="reschart__axis-bg" x={0} y={0} width={PADDING_LEFT - 4} height={height} />
           {ticks.map((tick, i) => (
             <text key={i} className="chart__tick" x={PADDING_LEFT - 6} y={y(tick) + 3} textAnchor="end">

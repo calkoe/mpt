@@ -178,6 +178,33 @@ describe('Migration', () => {
     // Bestehendes bleibt unangetastet.
     expect(task.assignments[0].value).toBe(0.5);
     expect(task.costs[0].amount).toBe(500);
+    // Schema 7: freie Notizen, bei einer alten Datei zunaechst keine.
+    expect(client.notes).toEqual([]);
+  });
+
+  it('uebernimmt Notizen und verwirft leere', () => {
+    const result = migrate({
+      schemaVersion: CURRENT_SCHEMA_VERSION,
+      clients: [
+        {
+          id: 'c1',
+          name: 'X',
+          notes: [
+            { id: 'n1', text: 'Angebot liegt vor', x: 40, y: 300 },
+            // Leer geschrieben heisst geloescht - auch beim Laden.
+            { id: 'n2', text: '   ', x: 0, y: 0 },
+            // Ohne Id und ohne Position: beides wird ergaenzt.
+            { text: 'Ohne alles' },
+          ],
+        },
+      ],
+    });
+
+    const notes = result.db.clients[0].notes;
+    expect(notes.map((n) => n.text)).toEqual(['Angebot liegt vor', 'Ohne alles']);
+    expect(notes[0]).toMatchObject({ id: 'n1', x: 40, y: 300 });
+    expect(notes[1].id).toBeTruthy();
+    expect(notes[1]).toMatchObject({ x: 0, y: 0 });
   });
 
   it('leitet den Vorhabenstatus aus den Aufgaben ab', () => {

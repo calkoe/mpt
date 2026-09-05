@@ -15,6 +15,7 @@ import { Button, EmptyState, NumberSlider, Segmented, Switch } from '../componen
 import { SplitStack } from '../components/SplitStack';
 import { TagFilter } from '../components/TagFilter';
 import { ChartToolbarProvider, ChartToolbarSlot } from '../components/ChartToolbar';
+import { DetachButton } from '../PanelWindow';
 import { GanttChart } from './GanttChart';
 import { NetworkChart } from './NetworkChart';
 import { TaskEditor, TaskEditorHeader } from './TaskEditor';
@@ -156,6 +157,10 @@ export function TaskOverview() {
           <Button variant="primary" onClick={addTask} title="Neue Aufgabe (Alt+N)">
             + Aufgabe
           </Button>
+
+          {/* Ganz rechts, in beiden Ansichten an derselben Stelle - er betrifft
+              nicht den Inhalt, sondern das Fenster. Siehe ui/PanelWindow.tsx. */}
+          <DetachButton mode="tasks" />
         </div>
 
         <div className="panel__body">

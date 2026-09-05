@@ -89,6 +89,8 @@ das Ergebnis zurück.
     \`kind\`: \`neutral\` | \`order\` (Beauftragung) | \`investment\`.
   - \`tags[]\` - \`{ id, name, color }\`; \`color\` ist ein Hexwert und bleibt stabil.
   - \`conditions[]\` - \`{ id, name, met }\`.
+  - \`notes[]\` - freie Notizen auf der Netzplanflaeche \`{ id, text, x, y }\`; \`x\`/\`y\` sind
+    Zeichenkoordinaten. Notizen ohne Text werden verworfen.
 
 ## Aktueller Datenbestand
 

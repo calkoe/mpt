@@ -50,6 +50,19 @@ vollständig in deinem Browser läuft:
   wird in der CI darauf geprüft, dass er aus genau einer Datei ohne externe Referenzen besteht.
 - **Funktioniert offline.** Netzwerkkabel ziehen ändert nichts.
 
+Das lässt sich in zehn Sekunden selbst nachprüfen – Entwicklertools öffnen, Reiter „Netzwerk", die
+Anwendung benutzen:
+
+<div align="center">
+
+<img src="docs/screenshot-network.png" alt="Netzwerk-Reiter der Chrome-Entwicklertools: nach dem Laden nur das Dokument selbst, kein einziger weiterer Aufruf" width="900">
+
+<sub>Das ist der gesamte Netzwerkverkehr: <code>mpt/</code> – die Anwendung selbst, 120&nbsp;kB – und ein
+fehlendes Favicon. Danach nichts mehr. Kein Analytics, keine Schriften, keine Telemetrie, kein
+Speichern „nach Hause". Planen, tippen, Datei schreiben: die Liste bleibt leer.</sub>
+
+</div>
+
 Damit ist MPT auch dort einsetzbar, wo eine Cloud-Lösung nicht in Frage kommt: Personalplanung,
 Budgets und Mandantendaten bleiben schlicht da, wo sie hingehören.
 

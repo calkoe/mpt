@@ -11,6 +11,7 @@
  * Daten. Angewendet wird er als `transform` auf einer SVG-Gruppe.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { windowOf } from './ownerWindow';
 
 export const MIN_SCALE = 0.15;
 export const MAX_SCALE = 4;
@@ -104,13 +105,15 @@ export function useZoomPan(): ZoomPan {
       setIsPanning(false);
       panStart.current = null;
     };
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-    window.addEventListener('pointercancel', onUp);
+    // Fenster der Zeichenflaeche, nicht das globale - siehe ownerWindow.ts.
+    const view = windowOf(containerRef.current);
+    view.addEventListener('pointermove', onMove);
+    view.addEventListener('pointerup', onUp);
+    view.addEventListener('pointercancel', onUp);
     return () => {
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      window.removeEventListener('pointercancel', onUp);
+      view.removeEventListener('pointermove', onMove);
+      view.removeEventListener('pointerup', onUp);
+      view.removeEventListener('pointercancel', onUp);
     };
   }, [isPanning]);
 

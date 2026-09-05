@@ -8,7 +8,7 @@
  *
  * Wird in der Aufgaben- und in der Ressourcenansicht gleichermaßen genutzt.
  *
- * Das Menü hängt an `document.body` statt am Knopf: die Werkzeugleiste scrollt
+ * Das Menü hängt am Body seines Fensters statt am Knopf: die Werkzeugleiste scrollt
  * waagerecht (`overflow-x: auto`), und sobald eine Achse nicht `visible` ist,
  * macht CSS die andere automatisch zu `auto` - das Menü wurde dadurch
  * abgeschnitten, egal wie hoch der z-index war.
@@ -17,6 +17,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { Id } from '../../model/types';
 import { useStore } from '../../state/store';
+import { documentOf, windowOf } from './ownerWindow';
 import { Button } from './controls';
 
 export function TagFilter({
@@ -39,26 +40,30 @@ export function TagFilter({
   useLayoutEffect(() => {
     if (!open) return;
     const box = ref.current?.getBoundingClientRect();
-    if (box) setPosition({ top: box.bottom + 4, right: window.innerWidth - box.right });
+    if (box) setPosition({ top: box.bottom + 4, right: windowOf(ref.current).innerWidth - box.right });
   }, [open]);
 
   useEffect(() => {
     if (!open) return;
+    // Fenster und Dokument des Knopfes, nicht die globalen: in der
+    // ausgelagerten Ansicht ist beides ein anderes - siehe ownerWindow.ts.
+    const view = windowOf(ref.current);
+    const doc = documentOf(ref.current);
     const onDocClick = (event: MouseEvent) => {
       const target = event.target as Node;
       if (ref.current?.contains(target) || menuRef.current?.contains(target)) return;
       setOpen(false);
     };
     const close = () => setOpen(false);
-    document.addEventListener('mousedown', onDocClick);
+    doc.addEventListener('mousedown', onDocClick);
     // Beim Scrollen oder Größenändern wandert der Knopf weg - dann schließen,
     // statt ein Menü an falscher Stelle stehen zu lassen.
-    window.addEventListener('resize', close);
-    window.addEventListener('scroll', close, true);
+    view.addEventListener('resize', close);
+    view.addEventListener('scroll', close, true);
     return () => {
-      document.removeEventListener('mousedown', onDocClick);
-      window.removeEventListener('resize', close);
-      window.removeEventListener('scroll', close, true);
+      doc.removeEventListener('mousedown', onDocClick);
+      view.removeEventListener('resize', close);
+      view.removeEventListener('scroll', close, true);
     };
   }, [open]);
 
@@ -107,7 +112,8 @@ export function TagFilter({
               </button>
             )}
           </div>,
-          document.body,
+          // Der Body des Fensters, in dem der Knopf tatsächlich steht.
+          documentOf(ref.current).body,
         )}
     </div>
   );

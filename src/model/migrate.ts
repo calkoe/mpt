@@ -20,6 +20,7 @@ import {
   type BudgetKind,
   type Client,
   type Condition,
+  type Note,
   type CostItem,
   type Database,
   type FileLock,
@@ -149,6 +150,13 @@ const MIGRATIONS: Record<number, (db: AnyRecord) => AnyRecord> = {
    * bekannt, und "heute" einzutragen wäre eine erfundene Tatsache.
    */
   5: (db) => ({ ...db, schemaVersion: 6 }),
+
+  /** 6 -> 7: freie Notizen auf der Netzplanflaeche. */
+  6: (db) => ({
+    ...db,
+    schemaVersion: 7,
+    clients: arr(db.clients).map((client) => ({ ...client, notes: [] })),
+  }),
 };
 
 export interface MigrationResult {
@@ -213,6 +221,7 @@ export function normalizeDatabase(raw: AnyRecord, notes: string[] = []): Databas
       budgets: [],
       tags: [],
       conditions: [],
+      notes: [],
     });
     notes.push('Kein Mandant vorhanden - "Standard" wurde angelegt.');
   }
@@ -295,6 +304,16 @@ function normalizeClient(raw: AnyRecord, notes: string[]): Client {
     name: str(c?.name, 'Bedingung'),
     met: bool(c?.met),
   }));
+
+  /* Notizen ohne Text gibt es nicht - leer geschrieben heisst geloescht. */
+  const clientNotes: Note[] = arr(raw?.notes)
+    .map((n) => ({
+      id: str(n?.id) || newId('not'),
+      text: str(n?.text),
+      x: num(n?.x, 0),
+      y: num(n?.y, 0),
+    }))
+    .filter((n) => n.text.trim().length > 0);
 
   const ventureIds = new Set(ventures.map((v) => v.id));
   const personIds = new Set(people.map((p) => p.id));
@@ -382,7 +401,7 @@ function normalizeClient(raw: AnyRecord, notes: string[]): Client {
     };
   });
 
-  return { id, name: str(raw?.name, 'Mandant'), ventures, tasks, people, budgets, tags, conditions };
+  return { id, name: str(raw?.name, 'Mandant'), ventures, tasks, people, budgets, tags, conditions, notes: clientNotes };
 }
 
 function clamp(value: number, min: number, max: number): number {

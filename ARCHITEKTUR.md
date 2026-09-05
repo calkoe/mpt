@@ -164,11 +164,34 @@ werden (`fill: none` an Kanten), sonst füllt das Bild sie schwarz aus.
 | `components/AssignmentFields.tsx`                   | Eine Personalzuordnung zum Bearbeiten - genutzt von der Aufgaben- **und** der Personenseite.         |
 | `components/TagFilter.tsx`                          | Tag-Filter als Aufklappmenü, in Aufgaben- und Ressourcenansicht identisch.                           |
 | `components/CostFields.tsx`                         | Eine Kostenposition zum Bearbeiten - genutzt von der Aufgaben- **und** der Budgetseite.              |
+| `components/ownerWindow.ts`                         | `windowOf()` / `documentOf()` - **nie `window` oder `document` global annehmen**, siehe unten.       |
+| `PanelWindow.tsx`                                   | Eine der beiden Ansichten in einem eigenen Browserfenster (Portal, dieselbe Instanz). `DetachButton` steht **ganz rechts** in beiden Werkzeugleisten. |
 | `Sidebar.tsx` / `TopBar.tsx` / `CommandPalette.tsx` | Rahmen der Anwendung.                                                                                |
-| `tasks/`                                            | Aufgabenübersicht: `NetworkChart`, `GanttChart`, `ResourceRailLayer`, `TaskEditor`.                  |
+| `tasks/`                                            | Aufgabenübersicht: `NetworkChart` (inkl. Notizkacheln), `GanttChart`, `ResourceRailLayer`, `TaskEditor`. |
 | `resources/`                                        | Ressourcenübersicht: `ResourceChart`, `ResourceTable`, `ResourceEditors`.                            |
 | `dialogs/`                                          | Checkpoint-Verlauf, KI-Austausch, Warnzentrum, Tag-Verwaltung, Auslastung ("Wer arbeitet woran?"), Kurzanleitung. |
 | `ErrorBoundary.tsx`                                 | Verhindert den weißen Bildschirm bei unerwarteten Zuständen.                                         |
+
+**Zwei Fenster, zwei Modi.** Wandert eine Ansicht ins eigene Fenster, schaltet das Hauptfenster
+automatisch auf den anderen Modus - es steht nie leer. Das ausgelagerte Fenster hält seinen eigenen
+Modus, das Hauptfenster folgt weiterhin `ui.mode`; wer beide auf denselben Modus stellt, bekommt ihn
+zweimal (erlaubt). `ui`, Undo und Datei sind geteilt, `preferences` ebenfalls - Netzplan/Gantt lässt
+sich deshalb nicht je Fenster verschieden einstellen.
+
+**Kein `window`/`document` global annehmen.** Aufgaben- und Ressourcenansicht können per
+`createPortal` in einem zweiten Browserfenster laufen (`ui/PanelWindow.tsx`) - derselbe React-Baum,
+derselbe Store, aber ein **anderes Dokument**. Ereignisse, die nicht am Element selbst hängen
+(`pointermove` beim Ziehen, Klick-ausserhalb, Escape, Portalziele), müssen deshalb über
+`windowOf()` / `documentOf()` aus `components/ownerWindow.ts` aufgelöst werden. Ohne ausgelagertes
+Fenster kommt genau das Hauptfenster heraus - der Normalfall ändert sich nicht.
+
+**Notizkacheln haben zwei Zustände - mit Absicht.** Angezeigt werden sie als SVG-Text
+(`wrapText()` aus `components/measureText.ts`), geschrieben wird in einem echten Textfeld in einem
+`foreignObject`. Ein dauerhaftes Textfeld wäre weniger Code, käme aber im PNG-Export nicht mit: dort
+wird das SVG serialisiert, und HTML darin verliert alle Stile. Gezogen wird an der Leiste oben,
+geschrieben darunter - ein Zeigerdruck kann nicht gleichzeitig Textmarke setzen und verschieben.
+Leer geschrieben heisst gelöscht; damit das **ein** Schritt im Verlauf bleibt, hält `commitIf` den
+leeren Zwischenstand zurück und Anlegen/Schreiben/Löschen teilen sich einen `coalesceKey`.
 
 **SVG-Geometrie gehört ins JSX, nicht ins CSS.** `rx`, `ry`, `x`, `y`, `width`, `height` als
 CSS-Eigenschaften funktionieren in Safari nicht - die Ecken bleiben dort eckig. Solche Werte immer

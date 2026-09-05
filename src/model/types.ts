@@ -16,7 +16,7 @@ export type IsoDateTime = string;
 
 export type Id = string;
 
-export const CURRENT_SCHEMA_VERSION = 6;
+export const CURRENT_SCHEMA_VERSION = 7;
 
 // ---------------------------------------------------------------------------
 // Aufgaben
@@ -290,6 +290,24 @@ export interface Condition {
   met: boolean;
 }
 
+/**
+ * Freie Notiz auf der Netzplanfläche.
+ *
+ * Bewusst ohne Verknüpfung zu einer Aufgabe: sie hält fest, was zwischen den
+ * Aufgaben steht - eine offene Frage, eine Annahme, ein Merkposten. Wäre sie an
+ * eine Aufgabe gebunden, wäre sie deren Beschreibung, und die gibt es schon.
+ *
+ * Position in Zeichenkoordinaten des Netzplans (nicht in Bildschirmpixeln), sie
+ * überlebt also Zoomen und Verschieben. Eine Notiz ohne Text gibt es nicht -
+ * leer geschrieben heißt gelöscht.
+ */
+export interface Note {
+  id: Id;
+  text: string;
+  x: number;
+  y: number;
+}
+
 export interface Client {
   id: Id;
   name: string;
@@ -299,6 +317,7 @@ export interface Client {
   budgets: Budget[];
   tags: Tag[];
   conditions: Condition[];
+  notes: Note[];
 }
 
 // ---------------------------------------------------------------------------

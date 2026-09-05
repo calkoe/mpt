@@ -7,6 +7,7 @@
  * Trenner fokussiert ist.
  */
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { documentOf, windowOf } from './ownerWindow';
 
 const MIN_RATIO = 0.12;
 const MAX_RATIO = 0.88;
@@ -45,15 +46,19 @@ export function SplitStack({
     };
     const onUp = () => setDragging(false);
 
-    document.body.classList.add('app--resizing');
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-    window.addEventListener('pointercancel', onUp);
+    // Fenster des Trenners, nicht das globale - siehe ownerWindow.ts.
+    const view = windowOf(containerRef.current);
+    const body = documentOf(containerRef.current).body;
+
+    body.classList.add('app--resizing');
+    view.addEventListener('pointermove', onMove);
+    view.addEventListener('pointerup', onUp);
+    view.addEventListener('pointercancel', onUp);
     return () => {
-      document.body.classList.remove('app--resizing');
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      window.removeEventListener('pointercancel', onUp);
+      body.classList.remove('app--resizing');
+      view.removeEventListener('pointermove', onMove);
+      view.removeEventListener('pointerup', onUp);
+      view.removeEventListener('pointercancel', onUp);
     };
   }, [applyFromPointer, dragging]);
 
