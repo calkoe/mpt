@@ -205,7 +205,28 @@ export function ResourceChart({
 
             return (
               <g key={point.bucket.key} onMouseEnter={() => enter(index)} onMouseLeave={leave}>
+                {/*
+                  **Ein** Tooltip je Zeitraum, an der Gruppe statt an jedem
+                  Segment. Ein `<title>` gilt für das Element samt allem
+                  darin - an der Gruppe deckt es die ganze Säule ab, auch die
+                  leere Fläche darüber. Vorher trug jedes gestapelte Segment
+                  einen eigenen; bei acht Kacheln waren das über viertausend
+                  zusätzliche Knoten, die React bei jeder Änderung abgleichen
+                  musste. Der Inhalt geht dabei nicht verloren: `tooltip()`
+                  listet die Aufgaben ohnehin einzeln auf, und die Zeile unter
+                  dem Diagramm zeigt dieselbe Aufteilung farbig.
+                */}
+                {(point.value > 0 || point.actual > 0) && (
+                  <title>{tooltip(point, series, taskLabel)}</title>
+                )}
+
+                {/*
+                  Fängt den Zeiger für die ganze Säule ab - `pointer-events`
+                  ausdrücklich, weil die Fläche ungehoverte durchsichtig ist
+                  und sonst nur die Balken selbst treffbar wären.
+                */}
                 <rect
+                  className="chart__column"
                   x={x(index)}
                   y={PADDING_TOP}
                   width={bucketWidth}
@@ -230,9 +251,7 @@ export function ResourceChart({
                       fill={taskColorOf(taskColors, part.taskId)}
                       opacity={isBudget ? 0.4 : 1}
                       onClick={() => onSelectTask?.(part.taskId)}
-                    >
-                      <title>{`${taskLabel(part.taskId)}: ${formatValue(part.value, series.unit)} geplant\n${point.bucket.label}`}</title>
-                    </rect>
+                    />
                   );
                 })}
 
@@ -254,13 +273,15 @@ export function ResourceChart({
                         height={segmentHeight}
                         fill={taskColorOf(taskColors, part.taskId)}
                         onClick={() => onSelectTask?.(part.taskId)}
-                      >
-                        <title>{`${taskLabel(part.taskId)}: ${formatValue(spent, series.unit)} ausgegeben\n${point.bucket.label}`}</title>
-                      </rect>
+                      />
                     );
                   })}
 
-                {/* Überschreitungen bekommen eine rote Klammer um den ganzen Stapel. */}
+                {/*
+                  Überschreitungen bekommen eine rote Klammer um den ganzen
+                  Stapel. Ohne eigenen Tooltip - der hängt an der Gruppe und
+                  gilt damit auch hier.
+                */}
                 {point.value > 0 && (
                   <rect
                     className={`chart__stack chart__stack--${state}`}
@@ -268,9 +289,7 @@ export function ResourceChart({
                     y={y(point.value)}
                     width={barWidth}
                     height={Math.max(0.5, y(0) - y(point.value))}
-                  >
-                    <title>{tooltip(point, series, taskLabel)}</title>
-                  </rect>
+                  />
                 )}
               </g>
             );
@@ -429,16 +448,28 @@ function LegendChip({ color, label, onClick }: { color: string; label: string; o
   );
 }
 
+/**
+ * Der einzige Tooltip eines Zeitraums - er hängt an der Gruppe und gilt damit
+ * für die ganze Säule.
+ *
+ * Er nennt je Aufgabe auch den abgerufenen Anteil. Das stand früher an einem
+ * eigenen `<title>` im inneren Balken; die Angabe ist damit nicht verloren,
+ * sondern nur an einer Stelle statt an vieren.
+ */
 function tooltip(
   point: ResourceSeries['points'][number],
   series: ResourceSeries,
   taskLabel: (id: string) => string,
 ): string {
+  const isBudget = series.kind === 'budget';
   const lines = [
-    `${point.bucket.label}: ${formatValue(point.value, series.unit)}${series.kind === 'budget' ? ' geplant' : ''}`,
-    series.kind === 'budget' ? `davon ausgegeben: ${formatValue(point.actual, series.unit)}` : '',
+    `${point.bucket.label}: ${formatValue(point.value, series.unit)}${isBudget ? ' geplant' : ''}`,
+    isBudget ? `davon ausgegeben: ${formatValue(point.actual, series.unit)}` : '',
     point.limit > 0 ? `Grenzwert: ${formatValue(point.limit, series.unit)}` : '',
-    ...point.parts.slice(0, 8).map((p) => `  ${taskLabel(p.taskId)}: ${formatValue(p.value, series.unit)}`),
+    ...point.parts.slice(0, 8).map((p) => {
+      const spent = isBudget && (p.actual ?? 0) > 0 ? `, davon ${formatValue(p.actual ?? 0, series.unit)} ausgegeben` : '';
+      return `  ${taskLabel(p.taskId)}: ${formatValue(p.value, series.unit)}${spent}`;
+    }),
   ];
   return lines.filter(Boolean).join('\n');
 }

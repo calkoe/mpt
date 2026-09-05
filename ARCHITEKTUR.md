@@ -314,7 +314,7 @@ Die Version wird an **genau einer Stelle** gepflegt: `version` in `package.json`
 ```bash
 # 1. Version in package.json anheben, Änderung committen
 # 2. Tag setzen und pushen
-git tag v1.4.1 && git push origin v1.4.1
+git tag v1.5.0 && git push origin v1.5.0
 ```
 
 Der Workflow `.github/workflows/build.yml` veröffentlicht **nur** bei einem Tag

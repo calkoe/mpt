@@ -16,7 +16,7 @@ Zum Mitnehmen: Seite speichern (<kbd>Strg</kbd>+<kbd>S</kbd>) – die Datei läu
 <br><br>
 
 [![Build](https://img.shields.io/badge/build-single--file-3559d9)](.github/workflows/build.yml)
-[![Tests](https://img.shields.io/badge/tests-61%20passing-1c7c59)](src/engine/engine.test.ts)
+[![Tests](https://img.shields.io/badge/tests-95%20passing-1c7c59)](src/engine/engine.test.ts)
 [![Lizenz](https://img.shields.io/badge/lizenz-MIT-696e79)](#lizenz)
 [![Quelltext](https://img.shields.io/badge/quelltext-github.com%2Fcalkoe%2Fmpt-24292f)](https://github.com/calkoe/mpt)
 
@@ -80,7 +80,9 @@ Budgets und Mandantendaten bleiben schlicht da, wo sie hingehören.
 | **Warnzentrum**           | Alle Hinweise an einer Stelle: überfällige Aufgaben, offene Bedingungen, Personen und Budgets ab 90 % Auslastung.    |
 | **Parallelität**          | „Solange A läuft, müssen B und C laufen" – wird geprüft und gemeldet, ohne Termine zu verschieben.                   |
 | **Versionierung**         | Automatische Checkpoints (max. alle 10 Min, die letzten 50) plus sofortiges Undo/Redo per `Strg+Z`.                  |
-| **Export**                | Netzplan und Gantt als PNG, der gesamte Bestand als CSV für Excel – beides ohne Umweg über einen Dienst.             |
+| **Notizen im Netzplan**   | Freie Kacheln auf der Fläche – direkt beschreibbar, frei verschiebbar; leer geschrieben heißt gelöscht.              |
+| **Zwei Fenster**          | Aufgaben und Ressourcen gleichzeitig auf zwei Bildschirmen – dieselbe Sitzung, dieselbe Datei, kein Abgleich.        |
+| **Export**                | Netzplan, Gantt und Ganglinien als PNG, der gesamte Bestand als CSV für Excel – ohne Umweg über einen Dienst.       |
 | **KI-Austausch**          | Exportiert den Bestand als Markdown mit Schema-Anleitung für ein LLM; der Import zeigt vor der Übernahme einen Diff. |
 | **Gemeinsame Ablage**     | Sperrvermerk in der Datei, damit auf SharePoint & Co. niemand versehentlich gleichzeitig schreibt.                   |
 | **Tastaturbedienung**     | Vollständig per Tab und Pfeiltasten bedienbar, mit Command-Palette auf `Strg+K`.                                     |
@@ -114,7 +116,7 @@ die Anwendung ein, die sie klein unten rechts anzeigt.
 
 ```bash
 # Version in package.json anheben, committen, dann:
-git tag v1.4.1 && git push origin v1.4.1
+git tag v1.5.0 && git push origin v1.5.0
 ```
 
 Veröffentlicht wird ausschließlich über solche Tags. Die CI prüft, dass der Tag die Form `vN.N.N`

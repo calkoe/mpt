@@ -1177,6 +1177,14 @@ h1, h2, h3, h4 {
 .chart__stack { fill: none; stroke: none; pointer-events: none; }
 
 /*
+ * Trefferflaeche einer Saeule: sie ist ungehovert durchsichtig, soll den Zeiger
+ * aber trotzdem annehmen - nur so gilt der Tooltip der Gruppe auch ueber dem
+ * leeren Raum oberhalb des Balkens, und das Hervorheben beginnt schon beim
+ * Betreten der Spalte statt erst auf dem Balken.
+ */
+.chart__column { pointer-events: all; }
+
+/*
  * Kumulierte Linie: eigene Skala, deshalb bewusst zurueckhaltend gezeichnet -
  * sie soll den Verlauf zeigen, nicht mit den Saeulen um Aufmerksamkeit
  * konkurrieren.

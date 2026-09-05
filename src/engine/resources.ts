@@ -16,11 +16,14 @@ import type { Budget, Client, CostInterval, CostItem, Id, IsoDate, PeriodValue, 
 import {
   addDays,
   buildBuckets,
+  countWorkdays,
+  countWorkdaysBetweenDays,
   diffDays,
-  isWorkday,
+  fromDay,
   periodEndOf,
   periodStartOf,
   toDate,
+  toDay,
   toIso,
   workdaysIn,
   yearOf,
@@ -338,28 +341,62 @@ export function periodValueAt(entries: { from?: IsoDate; to?: IsoDate; value: nu
 // Aggregation
 // ---------------------------------------------------------------------------
 
+/**
+ * Tageslasten den Zeiträumen zuordnen - **einmal je Reihe statt je Zeitraum**.
+ *
+ * Vorher lief jeder Zeitraum Tag für Tag durch und fragte die Tageskarte ab.
+ * Über einen Zehnjahreshorizont waren das je Reihe rund 4.300 Schritte, obwohl
+ * die Karte nur an wenigen hundert Tagen überhaupt etwas enthält. Jetzt wird
+ * die Karte einmal durchlaufen und jeder Eintrag per binärer Suche in seinen
+ * Zeitraum gelegt; Tage ausserhalb des Betrachtungszeitraums fallen dabei von
+ * selbst weg.
+ */
+function binByBucket(daily: Map<IsoDate, Contribution[]>, buckets: Bucket[]): Contribution[][] {
+  const bins: Contribution[][] = buckets.map(() => []);
+  if (buckets.length === 0) return bins;
+
+  const starts = buckets.map((b) => toDay(b.start));
+  const lastEnd = toDay(buckets[buckets.length - 1].end);
+
+  for (const [iso, list] of daily) {
+    const day = toDay(iso);
+    if (day < starts[0] || day > lastEnd) continue;
+    // Letzter Zeitraum, dessen Beginn nicht hinter dem Tag liegt.
+    let lo = 0;
+    let hi = starts.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (starts[mid] <= day) lo = mid;
+      else hi = mid - 1;
+    }
+    // Zwischen zwei Zeitraeumen kann eine Luecke liegen (Tagesraster ueber
+    // Wochenenden) - solche Tage gehoeren in keinen und werden verworfen.
+    if (day > toDay(buckets[lo].end)) continue;
+    bins[lo].push(...list);
+  }
+  return bins;
+}
+
 function aggregateBucket(
-  daily: Map<IsoDate, Contribution[]>,
+  contributions: Contribution[],
   bucket: Bucket,
   mode: 'sum' | 'workdayAverage',
 ): { value: number; parts: Contribution[]; rawSum: number; actual: number; workdays: number } {
   const parts = new Map<Id, { value: number; actual: number }>();
   let sum = 0;
   let actual = 0;
-  let workdays = 0;
-  let cur = bucket.start;
-  while (diffDays(cur, bucket.end) >= 0) {
-    if (isWorkday(cur)) workdays++;
-    for (const c of daily.get(cur) ?? []) {
-      sum += c.value;
-      actual += c.actual ?? 0;
-      const entry = parts.get(c.taskId) ?? { value: 0, actual: 0 };
-      entry.value += c.value;
-      entry.actual += c.actual ?? 0;
-      parts.set(c.taskId, entry);
-    }
-    cur = addDays(cur, 1);
+  // Ohne Schleife - siehe countWorkdays().
+  const workdays = countWorkdays(bucket.start, bucket.end);
+
+  for (const c of contributions) {
+    sum += c.value;
+    actual += c.actual ?? 0;
+    const entry = parts.get(c.taskId) ?? { value: 0, actual: 0 };
+    entry.value += c.value;
+    entry.actual += c.actual ?? 0;
+    parts.set(c.taskId, entry);
   }
+
   const divisor = mode === 'workdayAverage' ? Math.max(1, workdays) : 1;
   const list = [...parts.entries()]
     .map(([taskId, entry]) => ({ taskId, value: entry.value / divisor, actual: entry.actual / divisor }))
@@ -493,13 +530,13 @@ export function personSeries(
   options: SeriesOptions,
 ): ResourceSeries {
   const buckets = buildBuckets(options.from, options.to, options.granularity);
+  const bins = binByBucket(daily, buckets);
   const mode = options.personUnit === 'FTE' ? 'workdayAverage' : 'sum';
   let running = 0;
-  const points: SeriesPoint[] = buckets.map((bucket) => {
-    const { value, parts, rawSum } = aggregateBucket(daily, bucket, mode);
+  const points: SeriesPoint[] = buckets.map((bucket, index) => {
+    const { value, parts, rawSum, workdays } = aggregateBucket(bins[index], bucket, mode);
     // Grenzwert: verfügbare FTE (bei PT auf Personentage im Bucket hochgerechnet).
     const fte = periodValueAt(person.availability, bucket.start, person.defaultFte);
-    const workdays = workdaysIn(bucket.start, bucket.end).length;
     const limit = options.personUnit === 'FTE' ? fte : fte * workdays;
     // Kumuliert wird immer in Personentagen - die ungeteilte Tagessumme.
     running += rawSum;
@@ -521,10 +558,11 @@ export function personSeries(
 
 export function budgetSeries(budget: Budget, daily: Map<IsoDate, Contribution[]>, options: SeriesOptions): ResourceSeries {
   const buckets = buildBuckets(options.from, options.to, options.granularity);
+  const bins = binByBucket(daily, buckets);
   let running = 0;
   let runningActual = 0;
-  const points: SeriesPoint[] = buckets.map((bucket) => {
-    const { value, parts, actual } = aggregateBucket(daily, bucket, 'sum');
+  const points: SeriesPoint[] = buckets.map((bucket, index) => {
+    const { value, parts, actual } = aggregateBucket(bins[index], bucket, 'sum');
     const limit = periodValueAt(budget.limits, bucket.start, 0);
     running += value;
     runningActual += actual;
@@ -568,17 +606,34 @@ function finalize(
         ? active.reduce((s, p) => s + p.value, 0) / active.length
         : 0;
 
-  // Kalenderjahressummen direkt aus den Tageswerten - unabhängig vom Raster.
+  /*
+   * Kalenderjahressummen direkt aus den Tageswerten - unabhängig vom Raster.
+   *
+   * Bewusst **nicht** Tag für Tag: der abgedeckte Zeitraum reicht bei
+   * Dauerläufern über zehn Jahre, das wäre ein zweiter vollständiger Durchlauf
+   * je Reihe. Stattdessen einmal über die (dünn besetzte) Tageskarte für die
+   * Summen und eine Formel für die Arbeitstage je Jahr.
+   */
   const yearBuckets = new Map<number, { sum: number; workdays: number }>();
-  for (const p of points) {
-    let cur = p.bucket.start;
-    while (diffDays(cur, p.bucket.end) >= 0) {
-      const y = yearOf(cur);
-      const entry = yearBuckets.get(y) ?? { sum: 0, workdays: 0 };
-      if (isWorkday(cur)) entry.workdays++;
-      for (const c of daily.get(cur) ?? []) entry.sum += c.value;
-      yearBuckets.set(y, entry);
-      cur = addDays(cur, 1);
+  if (points.length > 0) {
+    const firstDay = toDay(points[0].bucket.start);
+    const lastDay = toDay(points[points.length - 1].bucket.end);
+
+    // Arbeitstage je Jahr, auf den abgedeckten Zeitraum zugeschnitten.
+    for (let year = yearOf(fromDay(firstDay)); year <= yearOf(fromDay(lastDay)); year++) {
+      const from = Math.max(firstDay, toDay(`${year}-01-01`));
+      const to = Math.min(lastDay, toDay(`${year}-12-31`));
+      if (to < from) continue;
+      yearBuckets.set(year, { sum: 0, workdays: countWorkdaysBetweenDays(from, to) });
+    }
+
+    // Summen aus den tatsächlich belegten Tagen.
+    for (const [iso, list] of daily) {
+      const day = toDay(iso);
+      if (day < firstDay || day > lastDay) continue;
+      const entry = yearBuckets.get(yearOf(iso));
+      if (!entry) continue;
+      for (const c of list) entry.sum += c.value;
     }
   }
   const yearly = [...yearBuckets.entries()]
@@ -628,14 +683,20 @@ export function sumDailyLoad(
 ): { planned: number; actual: number } {
   let planned = 0;
   let actual = 0;
-  let cur = from;
-  let guard = 0;
-  while (diffDays(cur, to) >= 0 && guard++ < 20_000) {
-    for (const c of daily.get(cur) ?? []) {
+  /*
+   * Über die vorhandenen Einträge, nicht über jeden Tag des Zeitraums: die
+   * Karte ist dünn besetzt, der Zeitraum kann Jahre umfassen. Damit entfällt
+   * auch die frühere Notbremse gegen zu lange Schleifen.
+   */
+  const fromDayNo = toDay(from);
+  const toDayNo = toDay(to);
+  for (const [iso, list] of daily) {
+    const day = toDay(iso);
+    if (day < fromDayNo || day > toDayNo) continue;
+    for (const c of list) {
       planned += c.value;
       actual += c.actual ?? 0;
     }
-    cur = addDays(cur, 1);
   }
   return { planned, actual };
 }
