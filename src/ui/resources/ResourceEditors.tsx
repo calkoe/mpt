@@ -2,7 +2,16 @@
  * Editoren für Personen und Budgets, inklusive der zeitraumabhängigen
  * Grenzwerte (verfügbare FTE bzw. Budget-Obergrenzen je Zeitraum).
  */
-import { BUDGET_KIND_LABEL, type Budget, type BudgetKind, type Id, type PeriodValue, type Person, type Task } from '../../model/types';
+import {
+  BUDGET_KIND_LABEL,
+  type Budget,
+  type BudgetKind,
+  type Id,
+  type IsoDate,
+  type PeriodValue,
+  type Person,
+  type Task,
+} from '../../model/types';
 import { createPeriodValue, createTag } from '../../model/factory';
 import { formatDateDe } from '../../engine/dates';
 import type { ScheduleResult } from '../../engine/schedule';
@@ -22,7 +31,9 @@ import {
 } from '../components/controls';
 import { PeriodPicker } from '../components/PeriodPicker';
 import { CostFields } from '../components/CostFields';
-import { formatValue } from '../../engine/resources';
+import { AssignmentFields } from '../components/AssignmentFields';
+import { budgetCeiling, formatValue } from '../../engine/resources';
+import { MeasureAmount, MeasureLabel } from '../components/CostMeasure';
 
 export function PersonEditor({
   person,
@@ -42,6 +53,10 @@ export function PersonEditor({
     }, coalesceKey ? { coalesceKey } : undefined);
 
   const linked = tasks.filter((t) => t.assignments.some((a) => a.personId === person.id));
+  /** Alle Zuordnungen, die auf diese Person zeigen - mit ihrer Aufgabe. */
+  const assignments = tasks.flatMap((task) =>
+    task.assignments.filter((a) => a.personId === person.id).map((assignment) => ({ task, assignment })),
+  );
 
   return (
     <div className="editor">
@@ -105,37 +120,80 @@ export function PersonEditor({
         </div>
 
         <div className="editor__section">
-          <div className="editor__section-title">Verknüpfte Aufgaben ({linked.length})</div>
-          <div className="list">
-            {linked.map((task) => {
+          <div className="editor__section-title">Zuordnungen dieser Person ({assignments.length})</div>
+          {/*
+            Dieselben Felder wie im Aufgaben-Editor, nur aus der anderen
+            Richtung: dort steht die Person in der Ueberschrift, hier die
+            Aufgabe. Ein Bauteil fuer beide - siehe AssignmentFields.
+          */}
+          <div className="col">
+            {assignments.map(({ task, assignment }) => {
               const st = schedule.byId.get(task.id);
-              const assignments = task.assignments.filter((a) => a.personId === person.id);
               return (
-                <button
-                  key={task.id}
-                  type="button"
-                  className="list__item"
-                  onClick={() => setUi({ mode: 'tasks', selectedTaskId: task.id, ventureId: task.ventureId })}
-                >
-                  <span className={`status-dot status-dot--${task.status}`} />
-                  <span className="grow truncate">{task.title}</span>
-                  <span className="faint nowrap">
-                    {assignments.map((a) => `${a.value}${a.mode === 'FTE' ? ' FTE' : ' PT'}`).join(', ')}
-                  </span>
-                  <span className="faint nowrap">{st ? formatDateDe(st.start) : ''}</span>
-                </button>
+                <AssignmentFields
+                  key={assignment.id}
+                  assignment={assignment}
+                  caption={`${task.title}${st ? ` · ab ${formatDateDe(st.start)}` : ''}`}
+                  taskStart={st?.start}
+                  taskWorkdays={st?.workdays ?? 1}
+                  onEdit={(label, recipe, coalesceKey) =>
+                    commitClient(label, (c) => {
+                      const target = c.tasks
+                        .find((t) => t.id === task.id)
+                        ?.assignments.find((a) => a.id === assignment.id);
+                      if (target) recipe(target);
+                    }, coalesceKey ? { coalesceKey } : undefined)
+                  }
+                  onRemove={() =>
+                    commitClient('Zuordnung entfernt', (c) => {
+                      const target = c.tasks.find((t) => t.id === task.id);
+                      if (target) target.assignments = target.assignments.filter((a) => a.id !== assignment.id);
+                    })
+                  }
+                />
               );
             })}
-            {linked.length === 0 && <span className="faint">Keine Aufgaben zugeordnet.</span>}
+            {assignments.length === 0 && <span className="faint">Keine Aufgaben zugeordnet.</span>}
           </div>
+
+          {linked.length > 0 && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                const first = linked[0];
+                setUi({ mode: 'tasks', selectedTaskId: first.id, ventureId: first.ventureId });
+              }}
+              title="Zur ersten verknüpften Aufgabe springen"
+            >
+              Aufgaben im Plan zeigen
+            </Button>
+          )}
         </div>
       </div>
     </div>
   );
 }
 
-export function BudgetEditor({ budget, tasks }: { budget: Budget; tasks: Task[] }) {
+export function BudgetEditor({
+  budget,
+  tasks,
+  schedule,
+  horizon,
+}: {
+  budget: Budget;
+  tasks: Task[];
+  schedule: ScheduleResult;
+  /** Betrachtungszeitraum - bestimmt, welche Obergrenzen als genehmigt zählen. */
+  horizon: { from: IsoDate; to: IsoDate };
+}) {
   const { commitClient } = useStore();
+
+  /** Laufzeit einer Aufgabe - daraus ergeben sich die Faelligkeiten. */
+  const termOf = (taskId: Id) => {
+    const st = schedule.byId.get(taskId);
+    return st ? { start: st.start, end: st.end, openEnded: st.openEnded } : undefined;
+  };
 
   const edit = (label: string, recipe: (b: Budget) => void, coalesceKey?: string) =>
     commitClient(label, (c) => {
@@ -149,6 +207,8 @@ export function BudgetEditor({ budget, tasks }: { budget: Budget; tasks: Task[] 
   );
   const plannedSum = costItems.reduce((s, { cost }) => s + cost.amount, 0);
   const actualSum = costItems.reduce((s, { cost }) => s + cost.actualAmount, 0);
+  /** Genehmigt = die Obergrenze aus Basiswert und Zeitraumwerten. */
+  const approved = budgetCeiling(budget, horizon.from, horizon.to);
 
   return (
     <div className="editor">
@@ -227,6 +287,7 @@ export function BudgetEditor({ budget, tasks }: { budget: Budget; tasks: Task[] 
                 key={cost.id}
                 cost={cost}
                 caption={task.title}
+                term={termOf(task.id)}
                 onEdit={(label, recipe, coalesceKey) =>
                   commitClient(label, (c) => {
                     const target = c.tasks.find((t) => t.id === task.id)?.costs.find((x) => x.id === cost.id);
@@ -244,22 +305,31 @@ export function BudgetEditor({ budget, tasks }: { budget: Budget; tasks: Task[] 
             {costItems.length === 0 && <span className="faint">Keine Kosten zugeordnet.</span>}
           </div>
 
-          {costItems.length > 0 && (
-            <div className="totals">
-              <div className="totals__row">
-                <span className="faint">geplant</span>
-                <span className="mono">{formatValue(plannedSum, 'EUR')}</span>
-              </div>
-              <div className="totals__row">
-                <span className="faint">abgerufen</span>
-                <span className="mono">{formatValue(actualSum, 'EUR')}</span>
-              </div>
-              <div className="totals__row totals__row--sum">
-                <span>offen</span>
-                <span className="mono">{formatValue(plannedSum - actualSum, 'EUR')}</span>
-              </div>
+          {/*
+            Drei Groessen, die nie verwechselt werden duerfen: was genehmigt
+            ist (die Obergrenze), was verplant ist und was tatsaechlich
+            abgeflossen ist. Nur die letzte loest Warnungen aus.
+          */}
+          <div className="totals">
+            <div className="totals__row">
+              <MeasureLabel measure="approved" />
+              <MeasureAmount measure="approved" value={approved > 0 ? approved : null} />
             </div>
-          )}
+            <div className="totals__row">
+              <MeasureLabel measure="planned" />
+              <MeasureAmount measure="planned" value={plannedSum} />
+            </div>
+            <div className="totals__row">
+              <MeasureLabel measure="actual" />
+              <MeasureAmount measure="actual" value={actualSum} />
+            </div>
+            <div className="totals__row totals__row--sum">
+              <span>{approved > 0 ? 'frei' : 'offen'}</span>
+              <span className="mono">
+                {approved > 0 ? formatValue(approved - actualSum, 'EUR') : formatValue(plannedSum - actualSum, 'EUR')}
+              </span>
+            </div>
+          </div>
         </div>
       </div>
     </div>

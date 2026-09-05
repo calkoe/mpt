@@ -16,6 +16,7 @@ import { useMemo, useState } from 'react';
 import type { Id } from '../../model/types';
 import { formatValue, type ResourceSeries } from '../../engine/resources';
 import { diffDays, formatDateDe, today } from '../../engine/dates';
+import { utilisationState } from '../../engine/validate';
 import { useElementSize } from '../components/useElementSize';
 import { taskColorOf } from '../components/taskPalette';
 
@@ -34,6 +35,7 @@ export function ResourceChart({
   taskLabel,
   taskColors,
   zoom,
+  onHoverPoint,
 }: {
   series: ResourceSeries;
   onSelectTask?: (taskId: Id) => void;
@@ -41,8 +43,23 @@ export function ResourceChart({
   taskColors: Map<Id, string>;
   /** Gemeinsame Zoomstufe aller Ganglinien - siehe ResourceOverview. */
   zoom: number;
+  /**
+   * Meldet den überfahrenen Zeitraum nach oben. Die Kachelüberschrift zeigt
+   * daraufhin dessen Kennzahlen - dort steht die Frage "wieviel in diesem
+   * Quartal?" ohnehin an, und im Diagramm selbst ist dafür kein Platz.
+   */
+  onHoverPoint?: (point: ResourceSeries['points'][number] | null) => void;
 }) {
   const [hover, setHover] = useState<number | null>(null);
+
+  const enter = (index: number) => {
+    setHover(index);
+    onHoverPoint?.(series.points[index] ?? null);
+  };
+  const leave = () => {
+    setHover(null);
+    onHoverPoint?.(null);
+  };
   const box = useElementSize<HTMLDivElement>();
 
   const count = series.points.length;
@@ -64,6 +81,8 @@ export function ResourceChart({
    */
   const innerWidth = Math.max(120, count * MIN_BUCKET_WIDTH * zoom);
   const width = PADDING_LEFT + innerWidth + PADDING_RIGHT;
+  /** Sichtbare Breite - daran haengen die mitgefuehrten Achsen. */
+  const viewportWidth = Math.max(PADDING_LEFT + PADDING_RIGHT + 40, box.width);
   const bucketWidth = innerWidth / Math.max(1, count);
   const maxValue = Math.max(series.peak, 1e-6) * 1.15;
 
@@ -116,6 +135,8 @@ export function ResourceChart({
   })();
 
   const hasLimit = series.points.some((p) => p.limit > 0);
+  /** Nur Budgets kennen den Unterschied zwischen geplant und ausgegeben. */
+  const isBudget = series.kind === 'budget';
   const hovered = hover !== null ? series.points[hover] : null;
 
   /** Aufgaben, die überhaupt zu dieser Ressource beitragen - für die Legende. */
@@ -135,25 +156,40 @@ export function ResourceChart({
     <div className="reschart">
       <div className="reschart__plot" ref={box.ref}>
         <svg width={width} height={height} role="img" aria-label={`Ganglinie ${series.name}`}>
-          {/* Raster */}
+          {/* Raster - die Beschriftung liegt in der mitgefuehrten Ebene. */}
           {ticks.map((tick, i) => (
-            <g key={i}>
-              <line className="chart__gridline" x1={PADDING_LEFT} y1={y(tick)} x2={width - PADDING_RIGHT} y2={y(tick)} />
-              <text className="chart__tick" x={PADDING_LEFT - 6} y={y(tick) + 3} textAnchor="end">
-                {compact(tick, series.unit)}
-              </text>
-            </g>
+            <line
+              key={i}
+              className="chart__gridline"
+              x1={PADDING_LEFT}
+              y1={y(tick)}
+              x2={width - PADDING_RIGHT}
+              y2={y(tick)}
+            />
           ))}
 
-          {/* Gestapelte Balken: ein Segment je beitragender Aufgabe. */}
+          {/*
+            Gestapelte Balken: ein Segment je beitragender Aufgabe.
+
+            Bei Budgets liegen zwei Balken **ineinander**: aussen und blass die
+            Planung, innen und kräftig das tatsächlich abgerufene Geld. So sieht
+            man in einem Bild beides - was vorgesehen war und was davon schon
+            weg ist - ohne zwei Diagramme nebeneinander vergleichen zu müssen.
+            Die Farbe je Aufgabe bleibt dieselbe, nur die Deckkraft trennt die
+            beiden Aussagen.
+          */}
           {series.points.map((point, index) => {
-            const breach = point.limit > 0 && point.value > point.limit + 1e-9;
+            const state = utilisationState(isBudget ? point.actual : point.value, point.limit);
             const barX = x(index) + 2;
             const barWidth = Math.max(1, bucketWidth - 4);
-            let cursor = 0;
+            /** Der Ist-Balken sitzt schmaler mittig im Plan-Balken. */
+            const actualWidth = Math.max(1, barWidth * 0.52);
+            const actualX = barX + (barWidth - actualWidth) / 2;
+            let plannedCursor = 0;
+            let actualCursor = 0;
 
             return (
-              <g key={point.bucket.key} onMouseEnter={() => setHover(index)} onMouseLeave={() => setHover(null)}>
+              <g key={point.bucket.key} onMouseEnter={() => enter(index)} onMouseLeave={leave}>
                 <rect
                   x={x(index)}
                   y={PADDING_TOP}
@@ -164,10 +200,10 @@ export function ResourceChart({
                 />
 
                 {point.parts.map((part) => {
-                  const top = cursor + part.value;
+                  const top = plannedCursor + part.value;
                   const segmentY = y(top);
-                  const segmentHeight = Math.max(0.5, y(cursor) - y(top));
-                  cursor = top;
+                  const segmentHeight = Math.max(0.5, y(plannedCursor) - y(top));
+                  plannedCursor = top;
                   return (
                     <rect
                       key={part.taskId}
@@ -177,17 +213,42 @@ export function ResourceChart({
                       width={barWidth}
                       height={segmentHeight}
                       fill={taskColorOf(taskColors, part.taskId)}
+                      opacity={isBudget ? 0.4 : 1}
                       onClick={() => onSelectTask?.(part.taskId)}
                     >
-                      <title>{`${taskLabel(part.taskId)}: ${formatValue(part.value, series.unit)}\n${point.bucket.label}`}</title>
+                      <title>{`${taskLabel(part.taskId)}: ${formatValue(part.value, series.unit)} geplant\n${point.bucket.label}`}</title>
                     </rect>
                   );
                 })}
 
+                {isBudget &&
+                  point.parts.map((part) => {
+                    const spent = part.actual ?? 0;
+                    if (spent <= 0) return null;
+                    const top = actualCursor + spent;
+                    const segmentY = y(top);
+                    const segmentHeight = Math.max(0.5, y(actualCursor) - y(top));
+                    actualCursor = top;
+                    return (
+                      <rect
+                        key={`actual-${part.taskId}`}
+                        className="chart__segment"
+                        x={actualX}
+                        y={segmentY}
+                        width={actualWidth}
+                        height={segmentHeight}
+                        fill={taskColorOf(taskColors, part.taskId)}
+                        onClick={() => onSelectTask?.(part.taskId)}
+                      >
+                        <title>{`${taskLabel(part.taskId)}: ${formatValue(spent, series.unit)} ausgegeben\n${point.bucket.label}`}</title>
+                      </rect>
+                    );
+                  })}
+
                 {/* Überschreitungen bekommen eine rote Klammer um den ganzen Stapel. */}
                 {point.value > 0 && (
                   <rect
-                    className={`chart__stack${breach ? ' chart__stack--breach' : ''}`}
+                    className={`chart__stack chart__stack--${state}`}
                     x={barX}
                     y={y(point.value)}
                     width={barWidth}
@@ -205,28 +266,7 @@ export function ResourceChart({
             Groessenordnungen groesser als der Wert je Zeitraum - auf derselben
             Skala waeren die Saeulen platt oder die Linie liefe aus dem Bild.
           */}
-          {cumulativePath && (
-            <>
-              <line
-                className="chart__axis chart__axis--cumulative"
-                x1={width - PADDING_RIGHT}
-                y1={PADDING_TOP}
-                x2={width - PADDING_RIGHT}
-                y2={y(0)}
-              />
-              {cumulativeTicks.map((tick, i) => (
-                <text
-                  key={i}
-                  className="chart__tick chart__tick--cumulative"
-                  x={width - PADDING_RIGHT + 6}
-                  y={cumulativeY(tick) + 3}
-                >
-                  {compact(tick, cumulativeUnit)}
-                </text>
-              ))}
-              <path className="chart__cumulative" d={cumulativePath} />
-            </>
-          )}
+          {cumulativePath && <path className="chart__cumulative" d={cumulativePath} />}
 
           {/*
             Heute als gestrichelte Senkrechte - dasselbe Zeichen wie im Gantt,
@@ -261,6 +301,51 @@ export function ResourceChart({
             );
           })}
         </svg>
+
+        {/*
+          Beide Achsen bleiben stehen. Sie liegen am linken und rechten Rand des
+          **sichtbaren** Bereichs, nicht am Rand des Inhalts: das Diagramm ist
+          breiter als die Flaeche (zehn Jahre Vorschau), und eine Skala, die man
+          erst herscrollen muss, ist keine Skala. Umgesetzt ueber
+          `position: sticky` - das erledigt der Compositor ohne JavaScript.
+        */}
+        <svg className="reschart__axes" width={viewportWidth} height={height} style={{ marginTop: -height }}>
+          <rect className="reschart__axis-bg" x={0} y={0} width={PADDING_LEFT - 4} height={height} />
+          {ticks.map((tick, i) => (
+            <text key={i} className="chart__tick" x={PADDING_LEFT - 6} y={y(tick) + 3} textAnchor="end">
+              {compact(tick, series.unit)}
+            </text>
+          ))}
+
+          {cumulativePath && (
+            <>
+              <rect
+                className="reschart__axis-bg"
+                x={viewportWidth - PADDING_RIGHT + 2}
+                y={0}
+                width={PADDING_RIGHT}
+                height={height}
+              />
+              <line
+                className="chart__axis chart__axis--cumulative"
+                x1={viewportWidth - PADDING_RIGHT}
+                y1={PADDING_TOP}
+                x2={viewportWidth - PADDING_RIGHT}
+                y2={y(0)}
+              />
+              {cumulativeTicks.map((tick, i) => (
+                <text
+                  key={i}
+                  className="chart__tick chart__tick--cumulative"
+                  x={viewportWidth - PADDING_RIGHT + 6}
+                  y={cumulativeY(tick) + 3}
+                >
+                  {compact(tick, cumulativeUnit)}
+                </text>
+              ))}
+            </>
+          )}
+        </svg>
       </div>
 
       {/*
@@ -272,7 +357,14 @@ export function ResourceChart({
         {hovered ? (
           <>
             <strong className="nowrap">{hovered.bucket.label}</strong>
-            <span className="mono">{formatValue(hovered.value, series.unit)}</span>
+            <span className="mono" title={isBudget ? 'geplant' : undefined}>
+              {formatValue(hovered.value, series.unit)}
+            </span>
+            {isBudget && (
+              <span className="mono" title="tatsächlich ausgegeben">
+                → {formatValue(hovered.actual, series.unit)}
+              </span>
+            )}
             {hovered.limit > 0 && (
               <span className={hovered.value > hovered.limit ? 'table__breach' : 'faint'}>
                 Grenzwert {formatValue(hovered.limit, series.unit)}
@@ -322,7 +414,8 @@ function tooltip(
   taskLabel: (id: string) => string,
 ): string {
   const lines = [
-    `${point.bucket.label}: ${formatValue(point.value, series.unit)}`,
+    `${point.bucket.label}: ${formatValue(point.value, series.unit)}${series.kind === 'budget' ? ' geplant' : ''}`,
+    series.kind === 'budget' ? `davon ausgegeben: ${formatValue(point.actual, series.unit)}` : '',
     point.limit > 0 ? `Grenzwert: ${formatValue(point.limit, series.unit)}` : '',
     ...point.parts.slice(0, 8).map((p) => `  ${taskLabel(p.taskId)}: ${formatValue(p.value, series.unit)}`),
   ];

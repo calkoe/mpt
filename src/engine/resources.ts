@@ -12,12 +12,14 @@
  * aggregiert: FTE als Mittelwert über die Arbeitstage des Buckets, PT und Euro
  * als Summe.
  */
-import type { Budget, Client, CostItem, Id, IsoDate, Person, Task } from '../model/types';
+import type { Budget, Client, CostInterval, CostItem, Id, IsoDate, PeriodValue, Person, Task } from '../model/types';
 import {
   addDays,
   buildBuckets,
   diffDays,
   isWorkday,
+  periodEndOf,
+  periodStartOf,
   toDate,
   toIso,
   workdaysIn,
@@ -62,7 +64,11 @@ export interface SeriesPoint {
   value: number;
   /** Grenzwert im Bucket (0 = keiner definiert). */
   limit: number;
-  /** Anteile je Aufgabe, absteigend sortiert. */
+  /**
+   * Anteile je Aufgabe, absteigend sortiert. Bei Budgets trägt jeder Anteil
+   * zusätzlich seinen abgerufenen Teil - die Diagramme zeichnen daraus den
+   * dunkleren Balken im helleren.
+   */
   parts: Contribution[];
   /**
    * Laufende Summe vom Beginn des Zeitraums bis einschliesslich dieses
@@ -89,10 +95,21 @@ export interface ResourceSeries {
   peak: number;
   /** Kalenderjahressummen (bei FTE: Mittelwert über die Arbeitstage des Jahres). */
   yearly: { year: number; value: number; limit: number }[];
-  /** Buckets mit Grenzwertüberschreitung. */
+  /**
+   * Buckets mit Grenzwertüberschreitung. Bei Budgets zählt dafür der
+   * **abgerufene** Betrag - eine Planung überschreitet nichts, sie plant nur.
+   */
   breaches: string[];
   /** Endwert der kumulierten Linie - Gesamtmenge über den Zeitraum. */
   cumulativeTotal: number;
+  /** Nur bei Budgets: Endwert der kumulierten Abrufe. */
+  cumulativeActualTotal: number;
+  /**
+   * Nur bei Budgets: der über den Zeitraum insgesamt zulässige Betrag, aus
+   * Basiswert und Zeitraumwerten zusammengesetzt (siehe `budgetCeiling`).
+   * `0` = keine Obergrenze definiert.
+   */
+  ceiling: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -191,6 +208,47 @@ function advance(iso: IsoDate, cost: CostItem): IsoDate {
   }
 }
 
+/**
+ * Erste Fälligkeit einer wiederkehrenden Kostenposition.
+ *
+ * Der Rastertag (Monats-, Quartals-, Jahresbeginn) des Aufgabenstarts liegt in
+ * aller Regel davor - dann zählt der nächste. Gibt es innerhalb der Laufzeit
+ * gar keinen, wird am Starttag gebucht.
+ */
+export function firstDueDate(start: IsoDate, end: IsoDate, cost: CostItem): IsoDate {
+  if (cost.interval === 'day') return start;
+  const aligned = periodStartOf(start, cost.interval);
+  if (diffDays(start, aligned) === 0) return aligned;
+  const next = nextPeriodStart(aligned, cost.interval);
+  return diffDays(next, end) >= 0 ? next : start;
+}
+
+/** Beginn des folgenden Rasters. */
+function nextPeriodStart(periodStart: IsoDate, interval: CostInterval): IsoDate {
+  return periodStartOf(addDays(periodEndOf(periodStart, interval), 1), interval);
+}
+
+/**
+ * Alle Fälligkeiten einer Kostenposition innerhalb einer Laufzeit.
+ *
+ * Dieselbe Rechnung wie in `budgetDailyLoad`, nur als Liste - damit die
+ * Oberfläche zeigen kann, **wann** ein Rhythmus tatsächlich bucht. Ohne diese
+ * Vorschau ist "alle 3 Monate" eine Behauptung, deren Wirkung man erst im
+ * Diagramm sieht.
+ */
+export function costDueDates(cost: CostItem, start: IsoDate, end: IsoDate, max = 60): IsoDate[] {
+  if (!cost.recurring) return [start];
+  const dates: IsoDate[] = [];
+  let cursor = firstDueDate(start, end, cost);
+  while (diffDays(cursor, end) >= 0 && dates.length < max) {
+    dates.push(cursor);
+    const next = advance(cursor, cost);
+    if (diffDays(cursor, next) <= 0) break;
+    cursor = next;
+  }
+  return dates;
+}
+
 /** Tageslast je Budget: Map budgetId -> Map isoDate -> Contribution[] */
 export function budgetDailyLoad(
   client: Client,
@@ -219,11 +277,21 @@ export function budgetDailyLoad(
         push(st.start);
         continue;
       }
-      let cursor = st.start;
+
+      /*
+       * Wiederkehrende Kosten fallen nur **innerhalb der Laufzeit** an und
+       * immer **am ersten Tag des Rasters** (Monats-, Quartals-, Jahresbeginn) -
+       * sonst laegen die Raten quer zu den Auswertungszeitraeumen und eine
+       * Quartalssumme enthielte mal drei, mal vier davon. Faellt kein Rastertag
+       * in die Laufzeit, wird am Starttag gebucht statt lautlos zu
+       * verschwinden; `validate.ts` meldet diese Schieflage.
+       */
+      let cursor = firstDueDate(st.start, st.end, cost);
       let guard = 0;
       while (diffDays(cursor, st.end) >= 0 && guard++ < 5000) {
         push(cursor);
         const next = advance(cursor, cost);
+        // Kein Fortschritt (unsinniges Intervall) waere eine Endlosschleife.
         if (diffDays(cursor, next) <= 0) break;
         cursor = next;
       }
@@ -235,6 +303,26 @@ export function budgetDailyLoad(
 // ---------------------------------------------------------------------------
 // Grenzwerte
 // ---------------------------------------------------------------------------
+
+/**
+ * Der über einen Zeitraum insgesamt zulässige Betrag: Basiswert `totalLimit`
+ * und die hineinragenden Zeitraumwerte `limits`. Sind beide gepflegt, gilt die
+ * engere Grenze - ein Jahresbudget hebt den Gesamtdeckel nicht auf und
+ * umgekehrt.
+ */
+export function budgetCeiling(budget: Budget, from: IsoDate, to: IsoDate): number {
+  let periodSum = 0;
+  for (const entry of budget.limits) {
+    if (entry.value <= 0) continue;
+    const startsAfter = entry.from && diffDays(to, entry.from) > 0;
+    const endsBefore = entry.to && diffDays(entry.to, from) > 0;
+    if (startsAfter || endsBefore) continue;
+    periodSum += entry.value;
+  }
+  const total = budget.totalLimit > 0 ? budget.totalLimit : 0;
+  if (total > 0 && periodSum > 0) return Math.min(total, periodSum);
+  return total > 0 ? total : periodSum;
+}
 
 /** Zeitraumabhängiger Wert an einem Tag; `fallback`, wenn kein Eintrag greift. */
 export function periodValueAt(entries: { from?: IsoDate; to?: IsoDate; value: number }[], day: IsoDate, fallback: number): number {
@@ -255,7 +343,7 @@ function aggregateBucket(
   bucket: Bucket,
   mode: 'sum' | 'workdayAverage',
 ): { value: number; parts: Contribution[]; rawSum: number; actual: number; workdays: number } {
-  const parts = new Map<Id, number>();
+  const parts = new Map<Id, { value: number; actual: number }>();
   let sum = 0;
   let actual = 0;
   let workdays = 0;
@@ -265,13 +353,16 @@ function aggregateBucket(
     for (const c of daily.get(cur) ?? []) {
       sum += c.value;
       actual += c.actual ?? 0;
-      parts.set(c.taskId, (parts.get(c.taskId) ?? 0) + c.value);
+      const entry = parts.get(c.taskId) ?? { value: 0, actual: 0 };
+      entry.value += c.value;
+      entry.actual += c.actual ?? 0;
+      parts.set(c.taskId, entry);
     }
     cur = addDays(cur, 1);
   }
   const divisor = mode === 'workdayAverage' ? Math.max(1, workdays) : 1;
   const list = [...parts.entries()]
-    .map(([taskId, value]) => ({ taskId, value: value / divisor }))
+    .map(([taskId, entry]) => ({ taskId, value: entry.value / divisor, actual: entry.actual / divisor }))
     .sort((a, b) => b.value - a.value);
   // `rawSum` ist die ungeteilte Summe - genau die wird kumuliert, damit auch
   // bei FTE eine sinnvolle Groesse (Personentage) entsteht.
@@ -284,6 +375,116 @@ export interface SeriesOptions {
   granularity: Granularity;
   /** Nur für Personen: FTE (Mittelwert) oder PT (Summe). */
   personUnit: PersonUnit;
+}
+
+// ---------------------------------------------------------------------------
+// Gesamtsichten ("virtuelle" Ressourcen)
+// ---------------------------------------------------------------------------
+
+/**
+ * Ids der beiden Gesamtsichten. Sie sind keine echten Ressourcen und dürfen
+ * deshalb nie in einer Auswahl oder einer Zuordnung landen.
+ */
+export const TOTAL_BUDGET_ID = '__total_budget';
+export const TOTAL_PEOPLE_ID = '__total_people';
+
+export function isTotalResource(id: Id): boolean {
+  return id === TOTAL_BUDGET_ID || id === TOTAL_PEOPLE_ID;
+}
+
+/**
+ * Legt mehrere zeitraumabhängige Wertreihen übereinander und summiert sie.
+ *
+ * Nötig, weil `periodValueAt` den **ersten** passenden Eintrag liefert - für
+ * eine Gesamtgrenze müssen aber alle gelten. Der Zeitraum wird dazu an jeder
+ * vorkommenden Grenze geschnitten; in jedem Abschnitt ist die Summe konstant.
+ *
+ * `unboundedIsUnlimited` unterscheidet die beiden Anwendungsfälle: bei
+ * **Obergrenzen** heisst ein fehlender Eintrag "keine Grenze", und die Summe
+ * aus einer Grenze und keiner Grenze ist keine Grenze - sonst behauptete das
+ * Gesamtbudget eine Schranke, die es nicht gibt. Bei **Verfügbarkeiten** heisst
+ * derselbe Fall "nicht verfügbar", dort wird schlicht summiert.
+ */
+function mergePeriods(
+  sources: { entries: { from?: IsoDate; to?: IsoDate; value: number }[]; fallback: number }[],
+  from: IsoDate,
+  to: IsoDate,
+  unboundedIsUnlimited = false,
+): PeriodValue[] {
+  const cuts = new Set<IsoDate>([from]);
+  const inside = (day: IsoDate) => diffDays(from, day) > 0 && diffDays(day, to) >= 0;
+  for (const source of sources) {
+    for (const entry of source.entries) {
+      if (entry.from && inside(entry.from)) cuts.add(entry.from);
+      if (entry.to) {
+        const dayAfter = addDays(entry.to, 1);
+        if (inside(dayAfter)) cuts.add(dayAfter);
+      }
+    }
+  }
+
+  const bounds = [...cuts].sort();
+  return bounds.map((start, index) => {
+    const values = sources.map((s) => periodValueAt(s.entries, start, s.fallback));
+    // 0 steht im Modell fuer "keine Obergrenze" - siehe budgetCeiling.
+    const unlimited = unboundedIsUnlimited && values.some((v) => v <= 0);
+    return {
+      id: `merged-${start}`,
+      from: start,
+      to: index + 1 < bounds.length ? addDays(bounds[index + 1], -1) : to,
+      value: unlimited ? 0 : values.reduce((sum, v) => sum + v, 0),
+    };
+  });
+}
+
+/**
+ * Das Gesamtbudget als eine Ressource: alle Kosten aller Budgets in einer
+ * Ganglinie, die Obergrenzen aufsummiert. Beantwortet die Frage "wie steht es
+ * um das Geld insgesamt?", die sich aus einzelnen Töpfen nicht ablesen lässt.
+ */
+export function totalBudgetOf(budgets: Budget[], from: IsoDate, to: IsoDate): Budget {
+  // Fehlt auch nur einem Budget der Gesamtdeckel, gibt es keinen fuer die
+  // Summe - dieselbe Ueberlegung wie bei den Zeitraumgrenzen.
+  const someUnlimited = budgets.length === 0 || budgets.some((b) => b.totalLimit <= 0);
+  return {
+    id: TOTAL_BUDGET_ID,
+    name: 'Gesamtbudget',
+    kind: 'neutral',
+    limits: mergePeriods(budgets.map((b) => ({ entries: b.limits, fallback: 0 })), from, to, true),
+    totalLimit: someUnlimited ? 0 : budgets.reduce((sum, b) => sum + b.totalLimit, 0),
+    tagIds: [],
+  };
+}
+
+/** Alle Personen als eine Ressource - die Gesamtkapazität des Teams. */
+export function totalPersonOf(people: Person[], from: IsoDate, to: IsoDate): Person {
+  return {
+    id: TOTAL_PEOPLE_ID,
+    name: 'Alle Personen',
+    role: '',
+    availability: mergePeriods(
+      people.map((p) => ({ entries: p.availability, fallback: p.defaultFte })),
+      from,
+      to,
+    ),
+    defaultFte: people.reduce((sum, p) => sum + p.defaultFte, 0),
+    tagIds: [],
+  };
+}
+
+/** Legt mehrere Tageslasten zu einer zusammen. */
+export function mergeDailyLoads(
+  maps: Iterable<Map<IsoDate, Contribution[]>>,
+): Map<IsoDate, Contribution[]> {
+  const merged = new Map<IsoDate, Contribution[]>();
+  for (const map of maps) {
+    for (const [day, list] of map) {
+      const target = merged.get(day);
+      if (target) target.push(...list);
+      else merged.set(day, [...list]);
+    }
+  }
+  return merged;
 }
 
 export function personSeries(
@@ -305,8 +506,16 @@ export function personSeries(
     return { bucket, value, limit, parts, cumulative: running, actual: 0, cumulativeActual: 0 };
   });
 
-  return finalize(person.id, person.name, 'person', options.personUnit, points, mode, daily, (day) =>
-    periodValueAt(person.availability, day, person.defaultFte),
+  return finalize(
+    person.id,
+    person.name,
+    'person',
+    options.personUnit,
+    points,
+    mode,
+    daily,
+    (day) => periodValueAt(person.availability, day, person.defaultFte),
+    0,
   );
 }
 
@@ -322,8 +531,16 @@ export function budgetSeries(budget: Budget, daily: Map<IsoDate, Contribution[]>
     return { bucket, value, limit, parts, cumulative: running, actual, cumulativeActual: runningActual };
   });
 
-  return finalize(budget.id, budget.name, 'budget', 'EUR', points, 'sum', daily, (day) =>
-    periodValueAt(budget.limits, day, 0),
+  return finalize(
+    budget.id,
+    budget.name,
+    'budget',
+    'EUR',
+    points,
+    'sum',
+    daily,
+    (day) => periodValueAt(budget.limits, day, 0),
+    budgetCeiling(budget, options.from, options.to),
   );
 }
 
@@ -336,6 +553,7 @@ function finalize(
   mode: 'sum' | 'workdayAverage',
   daily: Map<IsoDate, Contribution[]>,
   limitAt: (day: IsoDate) => number,
+  ceiling: number,
 ): ResourceSeries {
   const peak = points.reduce((m, p) => Math.max(m, p.value, p.limit), 0);
 
@@ -371,9 +589,64 @@ function finalize(
       limit: limitAt(`${year}-06-15`) * (mode === 'sum' && kind === 'person' ? e.workdays : 1),
     }));
 
-  const breaches = points.filter((p) => p.limit > 0 && p.value > p.limit + 1e-9).map((p) => p.bucket.key);
-  const cumulativeTotal = points.length > 0 ? points[points.length - 1].cumulative : 0;
-  return { resourceId: id, name, kind, unit, points, total, peak, yearly, breaches, cumulativeTotal };
+  /*
+   * Ueberschreitungen: bei Budgets zaehlt der abgerufene Betrag. Eine Planung
+   * ueber der Obergrenze ist eine Absicht, kein Verstoss - erst das Geld, das
+   * tatsaechlich abfliesst, reisst ein Budget. Genau auf der Grenze ist die
+   * Grenze eingehalten und nicht ueberschritten (siehe `utilisationState`).
+   */
+  const loadOf = (p: SeriesPoint) => (kind === 'budget' ? p.actual : p.value);
+  const breaches = points
+    .filter((p) => p.limit > 0 && loadOf(p) > p.limit * (1 + 1e-9))
+    .map((p) => p.bucket.key);
+  const last = points[points.length - 1];
+  return {
+    resourceId: id,
+    name,
+    kind,
+    unit,
+    points,
+    total,
+    peak,
+    yearly,
+    breaches,
+    cumulativeTotal: last?.cumulative ?? 0,
+    cumulativeActualTotal: last?.cumulativeActual ?? 0,
+    ceiling,
+  };
+}
+
+/**
+ * Summiert eine Tageslast über einen Zeitraum. Für die Summenblöcke unter den
+ * Listen: dort wird ein Jahr, Quartal oder Monat gewählt, und die Reihen des
+ * Diagramms haben ein anderes Raster.
+ */
+export function sumDailyLoad(
+  daily: Map<IsoDate, Contribution[]>,
+  from: IsoDate,
+  to: IsoDate,
+): { planned: number; actual: number } {
+  let planned = 0;
+  let actual = 0;
+  let cur = from;
+  let guard = 0;
+  while (diffDays(cur, to) >= 0 && guard++ < 20_000) {
+    for (const c of daily.get(cur) ?? []) {
+      planned += c.value;
+      actual += c.actual ?? 0;
+    }
+    cur = addDays(cur, 1);
+  }
+  return { planned, actual };
+}
+
+/** Verfügbare Kapazität einer Person im Zeitraum, in Personentagen. */
+export function availableWorkdays(person: Person, from: IsoDate, to: IsoDate): number {
+  let total = 0;
+  for (const day of workdaysIn(from, to)) {
+    total += periodValueAt(person.availability, day, person.defaultFte);
+  }
+  return total;
 }
 
 /** Formatierung für Anzeigezwecke. */

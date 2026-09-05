@@ -53,7 +53,7 @@ export function TopBar({
 }) {
   const store = useStore();
   const { prefs, setPrefs } = usePreferences();
-  const { total: warningCount, worst: worstWarning } = useWarningGroups();
+  const { total: warningCount } = useWarningGroups();
 
   const [dialog, setDialog] = useState<DialogKind | null>(null);
   const [notes, setNotes] = useState<string[]>([]);
@@ -163,9 +163,13 @@ export function TopBar({
           : "Nur im Browser (kein Dateizugriff)";
       case "clean":
       case "saved":
-        return `Gespeichert · ${store.fileName}`;
+        // "Lokal" ist keine Verzierung: es ist die Kernaussage des Werkzeugs -
+        // die Daten liegen in einer Datei auf diesem Rechner, nirgendwo sonst.
+        return `Lokal gespeichert · ${store.fileName}`;
       case "dirty":
-        return "Nicht gespeichert...";
+        // Zwischen "geändert" und "geschrieben" liegt die Wartezeit des
+        // Autosave. Das ist kein Warnzustand - es passiert gleich von selbst.
+        return store.fileName ? `Wartet auf Speichern · ${store.fileName}` : "Nicht gespeichert...";
       case "saving":
         return "Speichert...";
       case "error":
@@ -180,6 +184,7 @@ export function TopBar({
       <div className="topbar__brand">
         MPT <span>Projektmanagement</span>
       </div>
+
 
       <div className="topbar__divider" />
 
@@ -222,25 +227,39 @@ export function TopBar({
         )}
       </div>
 
+      {/*
+        Mittig zwischen Speicherstand und Warnzentrum: der wichtigste Satz über
+        dieses Werkzeug, dort, wo man ihn beiläufig liest. Die beiden Abstände
+        links und rechts halten ihn in der Mitte, egal wie lang der Dateiname
+        ist. Bewusst blass - eine Zusicherung, keine Werbung.
+      */}
+      <div className="spacer" />
+      <span
+        className="topbar__privacy"
+        title="Es gibt keinen Server, keine Konten und keine Übertragung - der Datenbestand liegt als Datei auf diesem Rechner."
+      >
+        Alle Daten lokal auf diesem Rechner
+      </span>
       <div className="spacer" />
 
       {/*
-        Warnzentrum - der Zähler ist zugleich der Einstieg und trägt die Farbe
-        des schwersten Befunds: rot bei überschrittenen Grenzen, orange wenn es
-        eng wird, sonst neutral.
+        Einstieg ins Warnzentrum. Bewusst immer neutral und ohne Zahl: die
+        Kopfzeile ist keine Alarmleiste, und ein dauerhaft oranger Zähler
+        stumpft ab. Wie ernst es steht, sagt das Warnzentrum selbst - dort
+        stehen die Befunde farbig und sortiert.
       */}
       <button
         type="button"
-        className={`warncount${worstWarning ? ` warncount--${worstWarning}` : ""}`}
+        className="warncount"
         onClick={onOpenWarnings}
         title={
           warningCount > 0
             ? `${warningCount} Hinweis(e) - Warnzentrum öffnen (Alt+W)`
             : "Keine Hinweise - Warnzentrum öffnen (Alt+W)"
         }
+        aria-label="Warnzentrum öffnen"
       >
         <span aria-hidden="true">&#9888;</span>
-        {warningCount > 0 ? warningCount : "keine"}
       </button>
 
       <div className="topbar__divider" />

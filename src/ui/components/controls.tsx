@@ -17,6 +17,7 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from 'react';
+import { isPlausibleIso, MAX_YEAR, MIN_YEAR } from '../../engine/dates';
 
 // ---------------------------------------------------------------------------
 // Button
@@ -182,14 +183,18 @@ export function Field({
 /**
  * Verzögerung, bis eine Eingabe in den Datenbestand geschrieben wird.
  *
- * Jeder Commit klont den gesamten Bestand und lässt Terminplan und
- * Ressourcenlast neu rechnen. Pro Tastendruck oder Reglerschritt ist das viel
- * zu teuer - die Oberfläche wird davon spürbar zäh. Bedienelemente halten
- * ihren Wert deshalb selbst und melden ihn erst nach einer kurzen Pause.
+ * **Eine Zahl für alles** - Text, Zahl, Datum, Regler und Auswahl. Jeder
+ * Commit klont den gesamten Bestand und lässt Terminplan und Ressourcenlast
+ * neu rechnen; pro Tastendruck, Pfeiltaste oder Reglerschritt ist das viel zu
+ * teuer, die Oberfläche wird davon spürbar zäh. Bedienelemente halten ihren
+ * Wert deshalb selbst und melden ihn erst nach einer Sekunde Ruhe. Wer eine
+ * Zahl schnell hochklickt, erzeugt so genau eine Neuberechnung statt zwanzig.
+ *
+ * Das Zurückschreiben in die Datei ist davon unabhängig und wartet länger
+ * (siehe `AUTOSAVE_DEBOUNCE_MS` im Store) - ein Schreibvorgang auf einem
+ * Netzlaufwerk kostet spürbar Zeit.
  */
-const TEXT_COMMIT_DELAY_MS = 300;
-/** Regler bewegen sich schneller als Finger tippen - kürzere Pause. */
-const SLIDER_COMMIT_DELAY_MS = 120;
+export const COMMIT_DELAY_MS = 1000;
 
 /**
  * Eigener Zustand mit verzögerter Übernahme.
@@ -198,8 +203,17 @@ const SLIDER_COMMIT_DELAY_MS = 120;
  * über `flush`, etwa beim Loslassen) geht der Wert an `onChange`. Ändert sich
  * der Wert von aussen - Undo, Dateiwechsel, anderes Objekt gewählt -,
  * übernimmt das Element ihn, solange gerade keine Eingabe aussteht.
+ *
+ * `commitIf` hält unfertige Zwischenstände zurück: beim Tippen einer
+ * Jahreszahl steht kurzzeitig das Jahr 2 im Datumsfeld, und damit soll nicht
+ * gerechnet werden.
  */
-function useDeferredCommit<T>(value: T, onChange: (value: T) => void, delay: number) {
+function useDeferredCommit<T>(
+  value: T,
+  onChange: (value: T) => void,
+  delay: number,
+  commitIf: (value: T) => boolean = () => true,
+) {
   const [draft, setDraft] = useState(value);
   const timer = useRef<number | null>(null);
   const pending = useRef(false);
@@ -215,7 +229,7 @@ function useDeferredCommit<T>(value: T, onChange: (value: T) => void, delay: num
     if (timer.current) window.clearTimeout(timer.current);
     timer.current = null;
     pending.current = false;
-    if (next !== previous) to(next);
+    if (next !== previous && commitIf(next)) to(next);
   };
 
   useEffect(() => {
@@ -264,7 +278,7 @@ export function TextInput({
   title?: string;
   className?: string;
 } & Omit<InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange' | 'className'>) {
-  const text = useDeferredCommit(value, onChange, TEXT_COMMIT_DELAY_MS);
+  const text = useDeferredCommit(value, onChange, COMMIT_DELAY_MS);
   return (
     <input
       {...rest}
@@ -289,7 +303,7 @@ export function TextArea({
   placeholder?: string;
   rows?: number;
 }) {
-  const text = useDeferredCommit(value, onChange, TEXT_COMMIT_DELAY_MS);
+  const text = useDeferredCommit(value, onChange, COMMIT_DELAY_MS);
   return (
     <textarea
       className="textarea"
@@ -302,6 +316,22 @@ export function TextArea({
   );
 }
 
+/**
+ * Datumsfeld.
+ *
+ * Zwei Dinge sind hier wichtig und nicht offensichtlich:
+ *
+ *  1. **Unfertige Eingaben dürfen nicht gerechnet werden.** Wer "2027" ins
+ *     Jahresfeld tippt, erzeugt unterwegs die Jahre 2, 20 und 202. Ein Plan,
+ *     der im Jahr 2 beginnt und in der Gegenwart endet, spannt zwei
+ *     Jahrtausende - die Terminrechnung braucht dafür Minuten und die Seite
+ *     steht. `commitIf` lässt solche Zwischenstände gar nicht erst durch.
+ *  2. Der Wert geht wie überall erst nach `COMMIT_DELAY_MS` Ruhe nach oben.
+ *
+ * Pfeil hoch/runter auf dem gerade markierten Teil (Tag, Monat, Jahr) ändert
+ * ihn schrittweise - das kann der Browser von Haus aus, es muss nur die
+ * Verzögerung dazwischen.
+ */
 export function DateInput({
   value,
   onChange,
@@ -311,22 +341,130 @@ export function DateInput({
   onChange: (value: string) => void;
   title?: string;
 }) {
+  const date = useDeferredCommit(
+    value ?? '',
+    onChange,
+    COMMIT_DELAY_MS,
+    (next) => next === '' || isPlausibleIso(next),
+  );
   return (
     <input
       type="date"
       className="input"
       title={title}
-      value={value ?? ''}
-      onChange={(e) => onChange(e.target.value)}
+      min={`${MIN_YEAR}-01-01`}
+      max={`${MAX_YEAR}-12-31`}
+      value={date.draft}
+      onChange={(e) => date.set(e.target.value)}
+      onBlur={date.flush}
     />
   );
 }
 
+// ---------------------------------------------------------------------------
+// Zahlenfeld
+// ---------------------------------------------------------------------------
+
+const NUMBER_FORMAT = new Intl.NumberFormat('de-DE', { maximumFractionDigits: 2 });
+
+/** Deutsche Schreibweise: Punkt als Tausendertrenner, Komma als Dezimalzeichen. */
+export function formatNumberDe(value: number): string {
+  return Number.isFinite(value) ? NUMBER_FORMAT.format(value) : '';
+}
+
+/** Liest eine deutsch geschriebene Zahl; `null`, wenn nichts Verwertbares drinsteht. */
+export function parseNumberDe(text: string): number | null {
+  const cleaned = text.replace(/\./g, '').replace(',', '.').replace(/[^\d.-]/g, '');
+  if (cleaned === '' || cleaned === '-') return null;
+  const value = Number(cleaned);
+  return Number.isFinite(value) ? value : null;
+}
+
 /**
- * Zahl-Eingabe als Slider mit direkter Zahleingabe daneben. Zahlen werden laut
- * Konzept überall so eingegeben - der Slider für schnelles Schätzen, das
- * Feld für exakte Werte.
+ * Zahleneingabe für alle Beträge und Mengen.
+ *
+ * Drei bewusste Entscheidungen:
+ *
+ *  - **Tausenderpunkte**, sobald das Feld nicht bearbeitet wird. Während des
+ *    Tippens bleibt der rohe Text stehen: würde mitten in der Eingabe
+ *    umformatiert, spränge die Schreibmarke bei jedem Tausender.
+ *  - **Die 0 wird als leeres Feld gezeigt.** Sonst landet man beim Klicken
+ *    hinter der Null und tippt aus 0 und 5 eine 05 - die häufigste kleine
+ *    Ärgerlichkeit an Zahlenfeldern überhaupt.
+ *  - **Pfeil hoch/runter** ändert den Wert um `step`, mit Umschalttaste um das
+ *    Zehnfache. Zusammen mit der gemeinsamen Verzögerung erzeugt schnelles
+ *    Durchklicken trotzdem nur eine Neuberechnung.
  */
+export function NumberField({
+  value,
+  onChange,
+  step = 1,
+  min,
+  max,
+  placeholder,
+  title,
+  className = '',
+  ariaLabel,
+}: {
+  value: number;
+  onChange: (value: number) => void;
+  step?: number;
+  min?: number;
+  max?: number;
+  placeholder?: string;
+  title?: string;
+  className?: string;
+  ariaLabel?: string;
+}) {
+  const number = useDeferredCommit(value, onChange, COMMIT_DELAY_MS);
+  /** Roher Text, solange getippt wird - sonst die formatierte Zahl. */
+  const [raw, setRaw] = useState<string | null>(null);
+
+  const clamp = (next: number) => {
+    let result = next;
+    if (min !== undefined) result = Math.max(min, result);
+    if (max !== undefined) result = Math.min(max, result);
+    // Auf die Schrittweite runden, damit aus 0,1er-Schritten keine 0,30000000004 wird.
+    const decimals = step < 1 ? String(step).split('.')[1]?.length ?? 2 : 0;
+    return Number(result.toFixed(decimals));
+  };
+
+  const shown = raw ?? (number.draft === 0 ? '' : formatNumberDe(number.draft));
+
+  const nudge = (direction: 1 | -1, factor: number) => {
+    const next = clamp(number.draft + direction * step * factor);
+    setRaw(null);
+    number.set(next);
+  };
+
+  return (
+    <input
+      className={`input input--num ${className}`.trim()}
+      type="text"
+      inputMode="decimal"
+      title={title}
+      aria-label={ariaLabel}
+      placeholder={placeholder ?? '0'}
+      value={shown}
+      onFocus={() => setRaw(number.draft === 0 ? '' : String(number.draft).replace('.', ','))}
+      onChange={(e) => {
+        setRaw(e.target.value);
+        const parsed = parseNumberDe(e.target.value);
+        number.set(parsed === null ? 0 : clamp(parsed));
+      }}
+      onKeyDown={(e) => {
+        if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+        e.preventDefault();
+        nudge(e.key === 'ArrowUp' ? 1 : -1, e.shiftKey ? 10 : 1);
+      }}
+      onBlur={() => {
+        setRaw(null);
+        number.flush();
+      }}
+    />
+  );
+}
+
 /**
  * Zahl-Eingabe als Regler mit direkter Zahleingabe daneben. Zahlen werden laut
  * Konzept überall so eingegeben - der Regler für schnelles Schätzen, das Feld
@@ -364,7 +502,7 @@ export function NumberSlider({
   /** Nur in der Kurzform: eigene Beschriftung des Werts (z.B. "alle"). */
   format?: (value: number) => string;
 }) {
-  const slider = useDeferredCommit(value, onChange, SLIDER_COMMIT_DELAY_MS);
+  const slider = useDeferredCommit(value, onChange, COMMIT_DELAY_MS);
 
   const clamp = (v: number) => Math.min(max, Math.max(min, v));
   const shown = Number.isFinite(slider.draft) ? clamp(slider.draft) : min;
@@ -394,15 +532,8 @@ export function NumberSlider({
       ) : (
         <>
           <div className="slider__value row">
-            <input
-              className="input input--num"
-              type="number"
-              min={min}
-              step={step}
-              value={rounded}
-              onChange={(e) => slider.set(e.target.value === '' ? min : Number(e.target.value))}
-              onBlur={slider.flush}
-            />
+            {/* Dasselbe Zahlenfeld wie überall - Tausenderpunkte, Pfeiltasten. */}
+            <NumberField value={rounded} onChange={(next) => slider.set(next)} min={min} max={max} step={step} />
           </div>
           {suffix && <span className="faint nowrap">{suffix}</span>}
         </>
@@ -411,26 +542,28 @@ export function NumberSlider({
   );
 }
 
-/** Betragsfeld ohne Slider - für Euro-Beträge mit großer Spannweite. */
+/**
+ * Betragsfeld ohne Regler - für Euro-Beträge mit großer Spannweite.
+ *
+ * Die Einheit steht **im** Feld, nicht daneben: sonst endet ein Betragsfeld
+ * ein Stück weiter links als jedes andere Feld der Zeile und die rechte Kante
+ * einer Formularspalte ist nicht mehr durchgehend.
+ */
 export function AmountInput({
   value,
   onChange,
   suffix = '€',
+  title,
 }: {
   value: number;
   onChange: (value: number) => void;
   suffix?: string;
+  title?: string;
 }) {
   return (
-    <div className="row">
-      <input
-        className="input input--num"
-        type="number"
-        step={100}
-        value={Number.isFinite(value) ? value : 0}
-        onChange={(e) => onChange(e.target.value === '' ? 0 : Number(e.target.value))}
-      />
-      <span className="faint">{suffix}</span>
+    <div className="amount">
+      <NumberField className="input--amount" value={value} onChange={onChange} step={100} min={0} title={title} />
+      <span className="amount__suffix faint">{suffix}</span>
     </div>
   );
 }

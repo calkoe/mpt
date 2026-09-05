@@ -2,10 +2,18 @@
  * Tabellenansicht der Ganglinien. Pro Ressource und pro Kalenderjahr werden
  * zusätzlich Summen gebildet (bei FTE der Mittelwert, da eine Summe von
  * Anteilen fachlich nichts aussagt).
+ *
+ * Bei Geld gibt es drei Grössen, die nie verwechselt werden dürfen:
+ * **genehmigt** (die Obergrenze), **geplant** (die Absicht) und **ausgegeben**
+ * (was tatsächlich abgeflossen ist). Sie stehen nicht nebeneinander, sondern
+ * werden umgeschaltet - drei Zahlen je Zelle wären in einer Tabelle über
+ * dreissig Zeiträume nicht mehr lesbar.
  */
 import { formatValue, type ResourceSeries } from '../../engine/resources';
+import { utilisationState } from '../../engine/validate';
+import { MeasureLabel, type CostMeasure } from '../components/CostMeasure';
 
-export function ResourceTable({ series }: { series: ResourceSeries[] }) {
+export function ResourceTable({ series, measure }: { series: ResourceSeries[]; measure: CostMeasure }) {
   if (series.length === 0) {
     return <div className="empty">Keine Ressourcen in dieser Auswahl.</div>;
   }
@@ -13,12 +21,34 @@ export function ResourceTable({ series }: { series: ResourceSeries[] }) {
   const buckets = series[0].points.map((p) => p.bucket);
   const years = [...new Set(series.flatMap((s) => s.yearly.map((y) => y.year)))].sort((a, b) => a - b);
 
+  /**
+   * Wert einer Zelle in der gewählten Grösse. Personen kennen nur eine Grösse -
+   * eine "genehmigte" Personalkapazität ist die Verfügbarkeit, also der
+   * Grenzwert, und Ausgaben gibt es dort nicht.
+   */
+  const valueOf = (s: ResourceSeries, point: ResourceSeries['points'][number]): number => {
+    if (measure === 'approved') return point.limit;
+    if (measure === 'actual') return s.kind === 'budget' ? point.actual : point.value;
+    return point.value;
+  };
+
+  const totalOf = (s: ResourceSeries): number => {
+    if (measure === 'approved') return s.kind === 'budget' ? s.ceiling : s.total;
+    if (measure === 'actual') return s.kind === 'budget' ? s.cumulativeActualTotal : s.total;
+    return s.total;
+  };
+
   return (
     <div style={{ overflow: 'auto', height: '100%' }}>
       <table className="table">
         <thead>
           <tr>
-            <th>Ressource</th>
+            <th>
+              <span className="row">
+                Ressource
+                <MeasureLabel measure={measure} />
+              </span>
+            </th>
             {buckets.map((b) => (
               <th key={b.key}>{b.label}</th>
             ))}
@@ -35,28 +65,40 @@ export function ResourceTable({ series }: { series: ResourceSeries[] }) {
             <tr key={s.resourceId}>
               <td title={s.kind === 'person' ? 'Person' : 'Budget'}>{s.name}</td>
               {s.points.map((p) => {
-                const breach = p.limit > 0 && p.value > p.limit + 1e-9;
+                // Gemessen wird immer am Ist - eine Planung reisst nichts.
+                const state = utilisationState(s.kind === 'budget' ? p.actual : p.value, p.limit);
+                const value = valueOf(s, p);
                 return (
-                  <td key={p.bucket.key} className={breach ? 'table__breach' : undefined} title={breach ? `Grenzwert ${formatValue(p.limit, s.unit)} überschritten` : undefined}>
-                    {p.value === 0 ? <span className="faint">–</span> : formatValue(p.value, s.unit)}
+                  <td
+                    key={p.bucket.key}
+                    className={state === 'over' ? 'table__breach' : undefined}
+                    title={state === 'over' ? `Grenzwert ${formatValue(p.limit, s.unit)} überschritten` : undefined}
+                  >
+                    {value === 0 ? <span className="faint">–</span> : formatValue(value, s.unit)}
                   </td>
                 );
               })}
               {years.map((year) => {
                 const entry = s.yearly.find((y) => y.year === year);
-                const breach = entry && entry.limit > 0 && entry.value > entry.limit + 1e-9;
+                if (!entry) {
+                  return (
+                    <td key={`y${year}`} style={{ borderLeft: '2px solid var(--border-strong)' }}>
+                      –
+                    </td>
+                  );
+                }
+                const value = measure === 'approved' ? entry.limit : entry.value;
                 return (
                   <td
                     key={`y${year}`}
                     style={{ borderLeft: '2px solid var(--border-strong)', fontWeight: 600 }}
-                    className={breach ? 'table__breach' : undefined}
                   >
-                    {entry ? formatValue(entry.value, s.unit) : '–'}
+                    {formatValue(value, s.unit)}
                   </td>
                 );
               })}
               <td style={{ borderLeft: '2px solid var(--border-strong)', fontWeight: 650 }}>
-                {formatValue(s.total, s.unit)}
+                {formatValue(totalOf(s), s.unit)}
               </td>
             </tr>
           ))}
@@ -66,18 +108,30 @@ export function ResourceTable({ series }: { series: ResourceSeries[] }) {
             <tr className="table__sum">
               <td>Summe</td>
               {buckets.map((b, index) => (
-                <td key={b.key}>{formatValue(series.reduce((sum, s) => sum + (s.points[index]?.value ?? 0), 0), series[0].unit)}</td>
+                <td key={b.key}>
+                  {formatValue(
+                    series.reduce((sum, s) => sum + (s.points[index] ? valueOf(s, s.points[index]) : 0), 0),
+                    series[0].unit,
+                  )}
+                </td>
               ))}
               {years.map((year) => (
                 <td key={`y${year}`} style={{ borderLeft: '2px solid var(--border-strong)' }}>
                   {formatValue(
-                    series.reduce((sum, s) => sum + (s.yearly.find((y) => y.year === year)?.value ?? 0), 0),
+                    series.reduce((sum, s) => {
+                      const entry = s.yearly.find((y) => y.year === year);
+                      if (!entry) return sum;
+                      return sum + (measure === 'approved' ? entry.limit : entry.value);
+                    }, 0),
                     series[0].unit,
                   )}
                 </td>
               ))}
               <td style={{ borderLeft: '2px solid var(--border-strong)' }}>
-                {formatValue(series.reduce((sum, s) => sum + s.total, 0), series[0].unit)}
+                {formatValue(
+                  series.reduce((sum, s) => sum + totalOf(s), 0),
+                  series[0].unit,
+                )}
               </td>
             </tr>
           )}

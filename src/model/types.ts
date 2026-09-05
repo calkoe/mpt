@@ -16,7 +16,7 @@ export type IsoDateTime = string;
 
 export type Id = string;
 
-export const CURRENT_SCHEMA_VERSION = 4;
+export const CURRENT_SCHEMA_VERSION = 6;
 
 // ---------------------------------------------------------------------------
 // Aufgaben
@@ -54,9 +54,15 @@ export function isSettled(status: TaskStatus): boolean {
  *  - 'date'       : fester Starttermin (`start`)
  *  - 'dependency' : Start = spätestes Ende aller Vorgänger + 1 Arbeitstag
  *
- * Die Dauer ist eine Spanne in Arbeitstagen (`durationMin` .. `durationMax`).
- * Bei fester Dauer sind beide Werte gleich. Wird stattdessen ein `end` gesetzt,
- * leitet die Engine die Dauer daraus ab (nur bei anchor === 'date' möglich).
+ * Die Dauer ist eine Spanne (`durationMin` .. `durationMax`), gezählt in der
+ * Einheit `durationUnit`. Bei fester Dauer sind beide Werte gleich. Wird
+ * stattdessen ein `end` gesetzt, leitet die Engine die Dauer daraus ab (nur bei
+ * anchor === 'date' möglich).
+ *
+ * **Die Einheit entscheidet, wie gerechnet wird** (siehe `addDuration()`):
+ * Arbeitstage zählen Mo-Fr, alle anderen Einheiten sind Kalenderzeit. Eine
+ * Aufgabe über 5 Jahre, die am 01.01. beginnt, endet damit am 31.12. des
+ * fünften Jahres - ohne Abzug von Wochenenden.
  *
  * Dauerläufer haben schlicht kein Enddatum: weder eine Dauer (`durationMax`
  * ist 0) noch ein festes `end`. Es gibt dafür bewusst kein eigenes Kennzeichen -
@@ -68,11 +74,30 @@ export interface TaskSchedule {
   start?: IsoDate;
   /** Optionales festes Ende; überschreibt die Dauer, wenn gesetzt. */
   end?: IsoDate;
-  /** Optimistische Dauer in Arbeitstagen; 0 = kein Enddatum. */
+  /** Optimistische Dauer in `durationUnit`; 0 = kein Enddatum. */
   durationMin: number;
-  /** Pessimistische Dauer in Arbeitstagen (>= durationMin); 0 = kein Enddatum. */
+  /** Pessimistische Dauer in `durationUnit` (>= durationMin); 0 = kein Enddatum. */
   durationMax: number;
+  /** Einheit der beiden Dauern. */
+  durationUnit: DurationUnit;
 }
+
+/**
+ * Einheit einer Aufgabendauer.
+ *
+ * `days` sind **Arbeitstage** (Mo-Fr, keine Feiertage). Alle anderen Einheiten
+ * sind Kalenderzeit und werden nicht in Arbeitstage umgerechnet - sonst
+ * verschöbe sich das Ende einer Mehrjahresaufgabe um Monate.
+ */
+export type DurationUnit = "days" | "weeks" | "months" | "quarters" | "years";
+
+export const DURATION_UNIT_LABEL: Record<DurationUnit, string> = {
+  days: "AT",
+  weeks: "Wochen",
+  months: "Monate",
+  quarters: "Quartale",
+  years: "Jahre",
+};
 
 /**
  * Dauerläufer: die Aufgabe hat kein Enddatum - keine Dauer und kein festes
@@ -145,6 +170,24 @@ export interface ChecklistItem {
   id: Id;
   text: string;
   done: boolean;
+  /**
+   * Wann abgehakt wurde. Fehlt bei allem, was vor Schema 6 erledigt wurde -
+   * dort ist der Zeitpunkt schlicht nicht bekannt und wird auch nicht erfunden.
+   */
+  doneAt?: IsoDateTime;
+}
+
+/**
+ * Fortschritt aus der Checkliste, z.B. 7 von 10.
+ *
+ * Nur für Aufgaben **in Arbeit** und nur, wenn es überhaupt Punkte gibt: an
+ * einer offenen Aufgabe wäre "0/10" keine Auskunft, sondern Rauschen, und an
+ * einer abgeschlossenen sagt der Status schon alles. Einzige Quelle der
+ * Wahrheit für Netzplan und Gantt.
+ */
+export function checklistProgress(task: Task): { done: number; total: number } | null {
+  if (task.status !== "active" || task.checklist.length === 0) return null;
+  return { done: task.checklist.filter((c) => c.done).length, total: task.checklist.length };
 }
 
 export interface Task {

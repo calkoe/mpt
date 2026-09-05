@@ -48,6 +48,12 @@ export interface PngExportOptions {
   /** Hintergrundfarbe; ohne Angabe bleibt das Bild transparent. */
   background?: string;
   fileName: string;
+  /**
+   * Zweite Ebene, die im Bild über dem Inhalt liegt - im Gantt die
+   * mitgeführte Beschriftungsspalte samt Ressourcenleiste. Ohne sie fehlten
+   * genau die Aufgabentitel im Export.
+   */
+  overlay?: SVGSVGElement | null;
 }
 
 export interface PngExportResult {
@@ -64,19 +70,7 @@ export async function downloadSvgAsPng(
   options: PngExportOptions,
 ): Promise<PngExportResult> {
   const { box, clipped } = exportBox(svg);
-  const clone = svg.cloneNode(true) as SVGSVGElement;
-  inlineStyles(svg, clone);
-
-  // Feste Maße und ein Ausschnitt, der genau den gewünschten Inhalt umfasst.
-  clone.setAttribute('width', String(box.width));
-  clone.setAttribute('height', String(box.height));
-  clone.setAttribute('viewBox', `${box.x} ${box.y} ${box.width} ${box.height}`);
-  clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
-
-  const source = new XMLSerializer().serializeToString(clone);
-  const url = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(source)}`;
-
-  const image = await loadImage(url);
+  const image = await renderSvg(svg, box);
   const scale = Math.min(SCALE, MAX_IMAGE_SIDE / Math.max(box.width, box.height));
   const canvas = document.createElement('canvas');
   canvas.width = Math.max(1, Math.round(box.width * scale));
@@ -90,10 +84,38 @@ export async function downloadSvgAsPng(
   }
   context.drawImage(image, 0, 0, canvas.width, canvas.height);
 
+  /*
+   * Die mitgeführte Ebene (Beschriftungsspalte und Ressourcenleiste im Gantt)
+   * liegt am linken Rand des sichtbaren Bereichs - im Bild also am linken Rand
+   * des Ausschnitts. Ohne sie fehlten im Export genau die Aufgabentitel.
+   */
+  if (options.overlay) {
+    const overlayBox = {
+      x: 0,
+      y: box.y,
+      width: options.overlay.width.baseVal.value,
+      height: box.height,
+    };
+    const overlayImage = await renderSvg(options.overlay, overlayBox);
+    context.drawImage(overlayImage, 0, 0, Math.round(overlayBox.width * scale), canvas.height);
+  }
+
   const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
   if (!blob) throw new Error('Das Bild konnte nicht erzeugt werden.');
   triggerDownload(blob, options.fileName);
   return { clipped };
+}
+
+/** Serialisiert ein SVG mit eingebetteten Stilen und lädt es als Bild. */
+async function renderSvg(svg: SVGSVGElement, box: Box): Promise<HTMLImageElement> {
+  const clone = svg.cloneNode(true) as SVGSVGElement;
+  inlineStyles(svg, clone);
+  clone.setAttribute('width', String(box.width));
+  clone.setAttribute('height', String(box.height));
+  clone.setAttribute('viewBox', `${box.x} ${box.y} ${box.width} ${box.height}`);
+  clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+  const source = new XMLSerializer().serializeToString(clone);
+  return loadImage(`data:image/svg+xml;charset=utf-8,${encodeURIComponent(source)}`);
 }
 
 /**

@@ -4,30 +4,57 @@
  * darunter die Ressourcenlisten und der Editor der gewählten Ressource.
  */
 import { useEffect, useMemo, useState } from 'react';
-import { createBudget, createPerson } from '../../model/factory';
-import { BUDGET_KIND_LABEL, type BudgetKind, type Id } from '../../model/types';
-import { diffDays, GRANULARITY_LABEL, SELECTABLE_GRANULARITIES, type Granularity } from '../../engine/dates';
+import { createBudget, createCondition, createPerson } from '../../model/factory';
+import { BUDGET_KIND_LABEL, type BudgetKind, type Id, type IsoDate } from '../../model/types';
 import {
+  diffDays,
+  GRANULARITY_LABEL,
+  SELECTABLE_GRANULARITIES,
+  today,
+  yearOf,
+  type Granularity,
+} from '../../engine/dates';
+import {
+  availableWorkdays,
+  budgetCeiling,
   budgetDailyLoad,
   budgetSeries,
   formatValue,
+  isTotalResource,
+  mergeDailyLoads,
   personDailyLoad,
   personSeries,
+  sumDailyLoad,
+  totalBudgetOf,
+  totalPersonOf,
+  type Contribution,
   type PersonUnit,
   type ResourceFilter,
   type ResourceSeries,
 } from '../../engine/resources';
+import {
+  addCeiling,
+  ceilingValue,
+  COST_MEASURES,
+  EMPTY_CEILING,
+  MEASURE_HINT,
+  MeasureAmount,
+  MeasureLabel,
+  UtilisationBar,
+  type Ceiling,
+} from '../components/CostMeasure';
 import { useDerived } from '../../state/useDerived';
-import { usePreferences, type ResourceView } from '../../state/preferences';
+import { usePreferences, type CostMeasure, type ResourceView } from '../../state/preferences';
 import { useStore } from '../../state/store';
 import { Button, EmptyState, Segmented, Switch, TextInput } from '../components/controls';
 import { SplitStack } from '../components/SplitStack';
 import { buildTaskColors } from '../components/taskPalette';
-import { ChartZoomControls } from '../components/ChartZoomControls';
+import { ZoomControls } from '../components/ChartToolbar';
 import { useChartZoom } from '../components/useChartZoom';
 import { useElementSize } from '../components/useElementSize';
 import { moveItem, useReorder } from '../components/useReorder';
 import { TagFilter } from '../components/TagFilter';
+import { PeriodPicker } from '../components/PeriodPicker';
 import { ResourceChart } from './ResourceChart';
 import { ResourceTable } from './ResourceTable';
 import { BudgetEditor, PersonEditor, ResourceEditorHeader } from './ResourceEditors';
@@ -68,10 +95,51 @@ export function ResourceOverview() {
     [client.budgets, budgetLoads, options.from, options.to, options.granularity],
   );
 
+  /*
+   * Zwei Gesamtsichten als eigene Ganglinien: alle Budgets zusammen und alle
+   * Personen zusammen, mit aufsummierten Obergrenzen. Sie beantworten die
+   * Frage, die aus einzelnen Toepfen nicht abzulesen ist - "wie steht es um
+   * das Geld / um die Leute insgesamt?". Technisch sind es gewoehnliche
+   * Ressourcen, deshalb funktionieren Diagramm, Tabelle und Zoom unveraendert.
+   */
+  const totals = useMemo<ResourceSeries[]>(() => {
+    const list: ResourceSeries[] = [];
+    if (client.budgets.length > 1) {
+      list.push(
+        budgetSeries(
+          totalBudgetOf(client.budgets, options.from, options.to),
+          mergeDailyLoads(budgetLoads.values()),
+          options,
+        ),
+      );
+    }
+    if (client.people.length > 1) {
+      list.push(
+        personSeries(
+          totalPersonOf(client.people, options.from, options.to),
+          mergeDailyLoads(personLoads.values()),
+          options,
+        ),
+      );
+    }
+    return list;
+  }, [
+    client.budgets,
+    client.people,
+    budgetLoads,
+    personLoads,
+    options.from,
+    options.to,
+    options.granularity,
+    options.personUnit,
+  ]);
+
   const selectedId = ui.selectedResourceId;
   const selectedPerson = client.people.find((p) => p.id === selectedId);
   const selectedBudget = client.budgets.find((b) => b.id === selectedId);
   const selectedResource = selectedPerson ?? selectedBudget;
+  /** Eine der beiden gerechneten Gesamtsichten - sie hat keinen Editor. */
+  const selectedTotal = selectedId !== null && isTotalResource(selectedId);
 
   /**
    * Freitextsuche über Name und Rolle. Wirkt gleichermaßen auf die Ganglinien
@@ -94,9 +162,28 @@ export function ResourceOverview() {
     ? personAll.filter((s) => s.resourceId === selectedPerson.id)
     : selectedBudget
       ? budgetAll.filter((s) => s.resourceId === selectedBudget.id)
-      : [...personShown, ...budgetShown];
+      : // Auch die Gesamtsichten lassen sich gross betrachten - sie sind
+        // gerechnete Ressourcen, aber genauso interessant wie die einzelnen.
+        isTotalResource(selectedId ?? '')
+        ? totals.filter((s) => s.resourceId === selectedId)
+        : // Die Gesamtsichten stehen vorn - sie sind die Antwort auf die erste
+        // Frage, die man an diese Ansicht hat.
+        [...totals, ...personShown, ...budgetShown];
 
   const taskLabel = (taskId: Id) => derived.taskById.get(taskId)?.title ?? 'Unbekannt';
+
+  /*
+   * Abschnitte der Ganglinien: Gesamtsichten, Personen, Budgets. Leere
+   * Abschnitte fallen weg, damit keine Trennlinie ins Nichts zeigt.
+   */
+  const sections = useMemo(() => {
+    const groups = [
+      { key: 'totals', series: shownSeries.filter((s) => isTotalResource(s.resourceId)) },
+      { key: 'people', series: shownSeries.filter((s) => s.kind === 'person' && !isTotalResource(s.resourceId)) },
+      { key: 'budgets', series: shownSeries.filter((s) => s.kind === 'budget' && !isTotalResource(s.resourceId)) },
+    ];
+    return groups.filter((g) => g.series.length > 0);
+  }, [shownSeries]);
 
   /*
    * Eine Zoomstufe fuer alle Ganglinien - sie zeigen denselben Zeitraum und
@@ -156,6 +243,20 @@ export function ResourceOverview() {
             ]}
           />
 
+          {/* Nur in der Tabelle: genehmigt / geplant / ausgegeben umschalten. */}
+          {prefs.resourceView === 'table' && (
+            <Segmented<CostMeasure>
+              ariaLabel="Kennzahl"
+              value={prefs.costMeasure}
+              onChange={(costMeasure) => setPrefs({ costMeasure })}
+              options={COST_MEASURES.map((m) => ({
+                value: m,
+                label: <MeasureLabel measure={m} />,
+                title: MEASURE_HINT[m],
+              }))}
+            />
+          )}
+
           <Segmented<Granularity>
             ariaLabel="Zeitraster"
             value={prefs.resourceGranularity}
@@ -186,7 +287,16 @@ export function ResourceOverview() {
               onChange={setSearch}
             />
           </div>
-          <ChartZoomControls zoom={chartZoom} />
+          {/* Dieselben Knoepfe wie im Netzplan und im Gantt - siehe ChartToolbar. */}
+          <ZoomControls
+            fitTitle="Gesamten Zeitraum wieder über die volle Breite zeigen"
+            zoom={{
+              scale: chartZoom.zoom,
+              zoomBy: chartZoom.zoomBy,
+              fit: chartZoom.fit,
+              adjusted: chartZoom.userAdjusted,
+            }}
+          />
           <TagFilter tagIds={tagIds} onChange={setTagIds} title="Nur Ressourcen mit diesen Tags anzeigen" />
         </div>
 
@@ -194,42 +304,48 @@ export function ResourceOverview() {
           {shownSeries.length === 0 ? (
             <EmptyState title="Keine Ressourcen" hint="Personen und Budgets entstehen direkt beim Zuordnen in einer Aufgabe." />
           ) : prefs.resourceView === 'table' ? (
-            <ResourceTable series={shownSeries} />
+            <ResourceTable series={shownSeries} measure={prefs.costMeasure} />
           ) : (
-            /* Zwei Ganglinien nebeneinander - bei nur einer gewählten Ressource
-               nimmt diese die volle Breite ein. */
-            <div className={`resource-grid${selectedId ? ' resource-grid--single' : ''}`}>
-              {shownSeries.map((series) => (
-                <div key={series.resourceId} className="panel panel--card">
-                  <div className="panel__head">
-                    <span className={`status-dot status-dot--${series.breaches.length > 0 ? 'breach' : 'ok'}`} />
-                    <span className="panel__title truncate">{series.name}</span>
-                    <span className="faint nowrap" style={{ fontSize: 'var(--fs-sm)' }}>
-                      {series.kind === 'person'
-                        ? `${prefs.personUnit === 'FTE' ? 'Ø aktiv' : 'Summe'}: ${formatValue(series.total, series.unit)}`
-                        : `Summe: ${formatValue(series.total, series.unit)}`}
-                      {series.breaches.length > 0 && ` · ${series.breaches.length} Überschreitung(en)`}
-                    </span>
-                    <div className="spacer" />
-                    <Button
-                      size="sm"
-                      onClick={() => setUi({ selectedResourceId: series.resourceId })}
-                      title="Diese Ressource einzeln betrachten und bearbeiten"
-                    >
-                      Details
-                    </Button>
+            /*
+              Gegliedert statt in einem Fluss: erst die beiden Gesamtsichten
+              nebeneinander, dann - durch eine feine Linie abgesetzt - die
+              Personen und zuletzt die Geldbudgets. Ohne diese Trennung stehen
+              Euro und Personentage bunt gemischt in einem Raster und man muss
+              jede Kachel einzeln lesen, um zu wissen, was man vor sich hat.
+            */
+            /*
+              Eine gewaehlte Ressource fuellt die Flaeche - dann gibt es nichts
+              zu gliedern. Wichtig ist die **direkte** Verschachtelung: das
+              Diagramm misst seine Hoehe, also muss sie definit sein. Steckte
+              das Raster in einem Zwischen-`div` ohne eigene Hoehe, ergaebe
+              `height: 100%` nichts Bestimmtes, das Diagramm zoege die Kachel
+              auf und die Kachel das Diagramm - die Flaeche waechst dann
+              endlos weiter und der Bereich scrollt von selbst.
+            */
+            <div className="resource-sections">
+              {sections.map((section, index) => (
+                <SectionFrame key={section.key} withRule={index > 0} single={Boolean(selectedId)}>
+                  <div
+                    className={`resource-grid${selectedId ? ' resource-grid--single' : ''}${
+                      section.key === 'totals' ? ' resource-grid--totals' : ''
+                    }`}
+                  >
+                    {section.series.map((series) => (
+                      <SeriesCard
+                        key={series.resourceId}
+                        series={series}
+                        taskLabel={taskLabel}
+                        taskColors={taskColors}
+                        zoom={chartZoom.zoom}
+                        onOpen={() => setUi({ selectedResourceId: series.resourceId })}
+                        onSelectTask={(taskId) => {
+                          const task = derived.taskById.get(taskId);
+                          setUi({ mode: 'tasks', selectedTaskId: taskId, ventureId: task?.ventureId ?? null });
+                        }}
+                      />
+                    ))}
                   </div>
-                  <ResourceChart
-                    series={series}
-                    taskLabel={taskLabel}
-                    taskColors={taskColors}
-                    zoom={chartZoom.zoom}
-                    onSelectTask={(taskId) => {
-                      const task = derived.taskById.get(taskId);
-                      setUi({ mode: 'tasks', selectedTaskId: taskId, ventureId: task?.ventureId ?? null });
-                    }}
-                  />
-                </div>
+                </SectionFrame>
               ))}
             </div>
           )}
@@ -252,7 +368,7 @@ export function ResourceOverview() {
             </Button>
           )}
           <span className="panel__title">
-            {selectedPerson ? 'Person' : selectedBudget ? 'Budget' : 'Ressourcen'}
+            {selectedPerson ? 'Person' : selectedBudget ? 'Budget' : selectedTotal ? 'Gesamtsicht' : 'Ressourcen'}
           </span>
 
           {selectedResource ? (
@@ -290,12 +406,28 @@ export function ResourceOverview() {
         </div>
 
         <div className="panel__body">
-          {selectedPerson ? (
+          {selectedTotal ? (
+            <EmptyState
+              title="Gerechnete Gesamtsicht"
+              hint="Sie fasst alle Budgets bzw. alle Personen zusammen. Bearbeiten lassen sich nur die einzelnen Ressourcen - zurück zur Übersicht und dort eine auswählen."
+            />
+          ) : selectedPerson ? (
             <PersonEditor person={selectedPerson} tasks={client.tasks} schedule={derived.schedule} />
           ) : selectedBudget ? (
-            <BudgetEditor budget={selectedBudget} tasks={client.tasks} />
+            <BudgetEditor
+              budget={selectedBudget}
+              tasks={client.tasks}
+              schedule={derived.schedule}
+              horizon={{ from: options.from, to: options.to }}
+            />
           ) : (
-            <ResourceLists personSeriesList={personShown} budgetSeriesList={budgetShown} />
+            <ResourceLists
+              personSeriesList={personShown}
+              budgetSeriesList={budgetShown}
+              personLoads={personLoads}
+              budgetLoads={budgetLoads}
+              horizon={{ from: options.from, to: options.to }}
+            />
           )}
         </div>
     </div>
@@ -311,6 +443,111 @@ export function ResourceOverview() {
   );
 }
 
+/**
+ * Umhuellung eines Abschnitts. Bei einer gewaehlten Ressource entfaellt sie
+ * ganz: das Raster wird dann direktes Flex-Kind und erbt damit eine definite
+ * Hoehe - siehe den Kommentar an der Aufrufstelle.
+ */
+function SectionFrame({
+  withRule,
+  single,
+  children,
+}: {
+  withRule: boolean;
+  single: boolean;
+  children: React.ReactNode;
+}) {
+  if (single) return <>{children}</>;
+  return (
+    <div className="resource-sections__group">
+      {withRule && <div className="section-rule" />}
+      {children}
+    </div>
+  );
+}
+
+/**
+ * Eine Ganglinien-Kachel.
+ *
+ * Die Kennzahlen in der Überschrift folgen dem Mauszeiger: überfährt man einen
+ * Zeitraum, stehen dort dessen Werte. Ohne Zeiger zeigt die Überschrift die
+ * Werte über den ganzen Betrachtungszeitraum - so beantwortet dieselbe Stelle
+ * beide Fragen, ohne dass eine zweite Zahlenreihe nötig wäre.
+ *
+ * Die ganze Kachel öffnet die Detailansicht. Ein eigener Knopf dafür war
+ * überflüssig: man klickt ohnehin ins Diagramm.
+ */
+function SeriesCard({
+  series,
+  taskLabel,
+  taskColors,
+  zoom,
+  onOpen,
+  onSelectTask,
+}: {
+  series: ResourceSeries;
+  taskLabel: (id: Id) => string;
+  taskColors: Map<Id, string>;
+  zoom: number;
+  onOpen: () => void;
+  onSelectTask: (taskId: Id) => void;
+}) {
+  const [hovered, setHovered] = useState<ResourceSeries['points'][number] | null>(null);
+  const isBudget = series.kind === 'budget';
+
+  return (
+    <div
+      className="panel panel--card panel--clickable"
+      role="button"
+      tabIndex={0}
+      title={`${series.name} - klicken für die Detailansicht`}
+      onClick={onOpen}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onOpen();
+        }
+      }}
+    >
+      <div className="panel__head">
+        <span className={`status-dot status-dot--${series.breaches.length > 0 ? 'breach' : 'ok'}`} />
+        <span className="panel__title truncate">{series.name}</span>
+        <span className="faint nowrap" style={{ fontSize: 'var(--fs-sm)' }}>
+          {hovered ? hovered.bucket.label : 'gesamt'}
+        </span>
+
+        {isBudget ? (
+          <span className="row faint nowrap" style={{ fontSize: 'var(--fs-sm)' }}>
+            {!hovered && <MeasureAmount measure="approved" value={series.ceiling > 0 ? series.ceiling : null} />}
+            <MeasureAmount measure="planned" value={hovered ? hovered.value : series.cumulativeTotal} />
+            <MeasureAmount measure="actual" value={hovered ? hovered.actual : series.cumulativeActualTotal} />
+          </span>
+        ) : (
+          <span className="row faint nowrap" style={{ fontSize: 'var(--fs-sm)' }}>
+            {hovered && hovered.limit > 0 && (
+              <MeasureAmount measure="approved" value={hovered.limit} suffix={series.unit as 'FTE' | 'PT'} />
+            )}
+            <MeasureAmount
+              measure="planned"
+              value={hovered ? hovered.value : series.total}
+              suffix={series.unit as 'FTE' | 'PT'}
+            />
+          </span>
+        )}
+      </div>
+
+      <ResourceChart
+        series={series}
+        taskLabel={taskLabel}
+        taskColors={taskColors}
+        zoom={zoom}
+        onHoverPoint={setHovered}
+        onSelectTask={onSelectTask}
+      />
+    </div>
+  );
+}
+
 /** Feste Breite der beiden Achsen im Ganglinien-Diagramm (siehe ResourceChart). */
 const CHART_AXES_WIDTH = 116;
 
@@ -322,6 +559,8 @@ function useTileWidth(containerRef: React.RefObject<HTMLDivElement>, containerWi
   const [width, setWidth] = useState(0);
   useEffect(() => {
     const tile = containerRef.current?.querySelector('.resource-grid > .panel');
+    // (Der Aufbau ist jetzt in Abschnitte gegliedert - der Selektor trifft
+    //  weiterhin die erste tatsaechlich gezeichnete Kachel.)
     if (tile) setWidth(tile.getBoundingClientRect().width);
   }, [containerRef, containerWidth]);
   return width || containerWidth;
@@ -331,9 +570,16 @@ function useTileWidth(containerRef: React.RefObject<HTMLDivElement>, containerWi
 function ResourceLists({
   personSeriesList,
   budgetSeriesList,
+  personLoads,
+  budgetLoads,
+  horizon,
 }: {
   personSeriesList: ResourceSeries[];
   budgetSeriesList: ResourceSeries[];
+  personLoads: Map<Id, Map<IsoDate, Contribution[]>>;
+  budgetLoads: Map<Id, Map<IsoDate, Contribution[]>>;
+  /** Ganzer Betrachtungszeitraum - die Auswahl "Gesamt" meint genau ihn. */
+  horizon: { from: IsoDate; to: IsoDate };
 }) {
   const { client, setUi, commitClient } = useStore();
   const derived = useDerived();
@@ -345,6 +591,46 @@ function ResourceLists({
   const budgetOrder = useReorder((from, to) =>
     commitClient('Budgets umsortiert', (c) => moveItem(c.budgets, from, to)),
   );
+
+  /*
+   * Voreinstellung ist das laufende Jahr, nicht der ganze Horizont: nur über
+   * denselben Zeitraum sind "genehmigt" und "geplant" überhaupt vergleichbar.
+   * Über zehn Jahre stünde die Planung eines Dauerläufers neben einer
+   * Obergrenze für zwei Jahre - da kann nur herauskommen, dass mehr geplant
+   * als genehmigt ist, ohne dass das etwas bedeutet.
+   */
+  const thisYear = { from: `${yearOf(today())}-01-01`, to: `${yearOf(today())}-12-31` };
+  const [personRange, setPersonRange] = useState(thisYear);
+  const [budgetRange, setBudgetRange] = useState(thisYear);
+
+  /*
+   * Kennzahlen aller Zeilen in einem Durchgang. Die Tagessummen laufen über
+   * jeden Tag des Zeitraums - bei zehn Jahren und mehreren Ressourcen ist das
+   * nichts, was man pro Rendern wiederholen darf.
+   */
+  const budgetFigures = useMemo(() => {
+    const map = new Map<Id, { approved: number; planned: number; actual: number }>();
+    for (const budget of client.budgets) {
+      const period = sumDailyLoad(budgetLoads.get(budget.id) ?? new Map(), budgetRange.from, budgetRange.to);
+      map.set(budget.id, {
+        approved: budgetCeiling(budget, budgetRange.from, budgetRange.to),
+        planned: period.planned,
+        actual: period.actual,
+      });
+    }
+    return map;
+  }, [client.budgets, budgetLoads, budgetRange.from, budgetRange.to]);
+
+  const personFigures = useMemo(() => {
+    const map = new Map<Id, { available: number; bound: number }>();
+    for (const person of client.people) {
+      map.set(person.id, {
+        available: availableWorkdays(person, personRange.from, personRange.to),
+        bound: sumDailyLoad(personLoads.get(person.id) ?? new Map(), personRange.from, personRange.to).planned,
+      });
+    }
+    return map;
+  }, [client.people, personLoads, personRange.from, personRange.to]);
 
   const renderRow = (order: ReturnType<typeof useReorder>) => (series: ResourceSeries, index: number) => {
     const warnings = derived.resourceWarnings.get(series.resourceId) ?? [];
@@ -372,12 +658,40 @@ function ResourceLists({
               </span>
             )}
           </span>
-          <span className="row faint mono" style={{ fontSize: 'var(--fs-sm)' }}>
-            <span title={series.unit === 'EUR' ? 'Summe über den Betrachtungszeitraum' : 'Mittel über die Zeiträume mit Last'}>
-              {formatValue(series.total, series.unit)}
-            </span>
-            <span title="Spitzenwert">↑{formatValue(series.peak, series.unit)}</span>
-          </span>
+          {series.kind === 'budget' ? (
+            /*
+              Bei Geld sagt der Spitzenwert eines einzelnen Zeitraums wenig -
+              entscheidend sind die drei Groessen genehmigt, geplant und
+              ausgegeben und ihr Verhaeltnis zueinander. Genau das zeigt die
+              Zeile mit dem Balken, ohne dass man ein Diagramm oeffnen muss.
+            */
+            (() => {
+              const figures = budgetFigures.get(series.resourceId) ?? { approved: 0, planned: 0, actual: 0 };
+              return (
+                <>
+                  <span className="row faint" style={{ fontSize: 'var(--fs-sm)' }}>
+                    <MeasureAmount measure="approved" value={figures.approved > 0 ? figures.approved : null} />
+                    <MeasureAmount measure="planned" value={figures.planned} />
+                    <MeasureAmount measure="actual" value={figures.actual} />
+                  </span>
+                  <UtilisationBar planned={figures.planned} actual={figures.actual} ceiling={figures.approved} />
+                </>
+              );
+            })()
+          ) : (
+            (() => {
+              const figures = personFigures.get(series.resourceId) ?? { available: 0, bound: 0 };
+              return (
+                <>
+                  <span className="row faint" style={{ fontSize: 'var(--fs-sm)' }}>
+                    <MeasureAmount measure="approved" value={figures.available} suffix="PT" />
+                    <MeasureAmount measure="planned" value={figures.bound} suffix="PT" />
+                  </span>
+                  <UtilisationBar planned={figures.bound} actual={figures.bound} ceiling={figures.available} />
+                </>
+              );
+            })()
+          )}
         </span>
       </div>
     );
@@ -388,18 +702,34 @@ function ResourceLists({
       <div className="editor__cols">
         <div className="editor__section">
           <div className="editor__section-title">Personen ({client.people.length})</div>
+          {/* Zeitraum der Kennzahlen - gilt für die Zeilen und die Summe. */}
+          <PeriodPicker
+            from={personRange.from}
+            to={personRange.to}
+            total={horizon}
+            scales={['total', 'year', 'quarter', 'month']}
+            onChange={(from, to) => setPersonRange({ from, to })}
+          />
           <div className="list">
             {personSeriesList.map(renderRow(peopleOrder))}
             {personSeriesList.length === 0 && <span className="faint">Noch keine Personen.</span>}
           </div>
+          <PersonTotals seriesList={personSeriesList} figures={personFigures} />
         </div>
         <div className="editor__section">
           <div className="editor__section-title">Budgets ({client.budgets.length})</div>
+          <PeriodPicker
+            from={budgetRange.from}
+            to={budgetRange.to}
+            total={horizon}
+            scales={['total', 'year', 'quarter', 'month']}
+            onChange={(from, to) => setBudgetRange({ from, to })}
+          />
           <div className="list">
             {budgetSeriesList.map(renderRow(budgetOrder))}
             {budgetSeriesList.length === 0 && <span className="faint">Noch keine Budgets.</span>}
           </div>
-          <BudgetTotals seriesList={budgetSeriesList} />
+          <BudgetTotals seriesList={budgetSeriesList} figures={budgetFigures} />
         </div>
         <div className="editor__section">
           <div className="editor__section-title">Ungetrackte Bedingungen ({client.conditions.length})</div>
@@ -415,69 +745,201 @@ function ResourceLists({
  * Gesamtsumme wenig: Investitionen und Beauftragungen werden in aller Regel
  * aus verschiedenen Töpfen bezahlt.
  */
-function BudgetTotals({ seriesList }: { seriesList: ResourceSeries[] }) {
+function BudgetTotals({
+  seriesList,
+  figures,
+}: {
+  seriesList: ResourceSeries[];
+  /** Bereits gerechnete Werte je Budget - siehe ResourceLists. */
+  figures: Map<Id, { approved: number; planned: number; actual: number }>;
+}) {
   const { client } = useStore();
-  const kindOf = new Map(client.budgets.map((b) => [b.id, b.kind]));
 
-  const sums = new Map<BudgetKind, number>();
+  // Alle drei Groessen stammen aus **demselben** Zeitraum - siehe ResourceLists.
+  const sums = new Map<BudgetKind, Sums>();
   for (const series of seriesList) {
-    const kind = kindOf.get(series.resourceId) ?? 'neutral';
-    sums.set(kind, (sums.get(kind) ?? 0) + series.total);
+    const budget = client.budgets.find((b) => b.id === series.resourceId);
+    const f = figures.get(series.resourceId);
+    if (!budget || !f) continue;
+    const entry = sums.get(budget.kind) ?? { approved: EMPTY_CEILING, planned: 0, actual: 0 };
+    entry.approved = addCeiling(entry.approved, f.approved);
+    entry.planned += f.planned;
+    entry.actual += f.actual;
+    sums.set(budget.kind, entry);
   }
-  const gesamt = [...sums.values()].reduce((s, v) => s + v, 0);
   if (seriesList.length === 0) return null;
+
+  const all: Sums = { approved: EMPTY_CEILING, planned: 0, actual: 0 };
+  for (const s of sums.values()) {
+    all.approved = s.approved.unlimited
+      ? { sum: all.approved.sum + s.approved.sum, unlimited: true }
+      : { ...all.approved, sum: all.approved.sum + s.approved.sum };
+    all.planned += s.planned;
+    all.actual += s.actual;
+  }
 
   return (
     <div className="totals">
-      {(Object.keys(BUDGET_KIND_LABEL) as BudgetKind[]).map((kind) => (
-        <div key={kind} className="totals__row">
-          <span className="faint">{BUDGET_KIND_LABEL[kind]}</span>
-          <span className="mono">{formatValue(sums.get(kind) ?? 0, 'EUR')}</span>
+      {/*
+        Drei Groessen, die nie verwechselt werden duerfen - deshalb stehen sie
+        nebeneinander in eigenen Spalten und nicht als eine Zahl: genehmigt ist
+        der Rahmen, geplant die Absicht, ausgegeben das abgeflossene Geld.
+      */}
+      <div className="totals__head">
+        <span />
+        <MeasureLabel measure="approved" />
+        <MeasureLabel measure="planned" />
+        <MeasureLabel measure="actual" />
+      </div>
+      {(Object.keys(BUDGET_KIND_LABEL) as BudgetKind[]).map((kind) => {
+        const sum: Sums = sums.get(kind) ?? { approved: EMPTY_CEILING, planned: 0, actual: 0 };
+        return (
+          <div key={kind} className="totals__block">
+            <div className="totals__grid">
+              <span className="faint truncate">{BUDGET_KIND_LABEL[kind]}</span>
+              <span className="mono">{ceilingValue(sum.approved) === null ? '∞' : formatValue(sum.approved.sum, 'EUR')}</span>
+              <span className="mono">{formatValue(sum.planned, 'EUR')}</span>
+              <span className="mono">{formatValue(sum.actual, 'EUR')}</span>
+            </div>
+            <UtilisationBar planned={sum.planned} actual={sum.actual} ceiling={ceilingValue(sum.approved) ?? 0} />
+          </div>
+        );
+      })}
+      <div className="totals__block totals__row--sum">
+        <div className="totals__grid">
+          <span>Gesamt</span>
+          <span className="mono">{ceilingValue(all.approved) === null ? '∞' : formatValue(all.approved.sum, 'EUR')}</span>
+          <span className="mono">{formatValue(all.planned, 'EUR')}</span>
+          <span className="mono">{formatValue(all.actual, 'EUR')}</span>
         </div>
-      ))}
-      <div className="totals__row totals__row--sum">
-        <span>Gesamt</span>
-        <span className="mono">{formatValue(gesamt, 'EUR')}</span>
+        <UtilisationBar planned={all.planned} actual={all.actual} ceiling={ceilingValue(all.approved) ?? 0} />
       </div>
     </div>
   );
 }
 
+/**
+ * Summen unter der Personenliste: verfügbare Kapazität gegen gebundene, beide
+ * in Personentagen über denselben Zeitraum. FTE wäre hier die falsche Einheit -
+ * ein Anteil je Woche lässt sich nicht über ein Jahr aufsummieren.
+ */
+function PersonTotals({
+  seriesList,
+  figures,
+}: {
+  seriesList: ResourceSeries[];
+  /** Bereits gerechnete Werte je Person - siehe ResourceLists. */
+  figures: Map<Id, { available: number; bound: number }>;
+}) {
+  if (seriesList.length === 0) return null;
+
+  let available = 0;
+  let bound = 0;
+  for (const series of seriesList) {
+    const f = figures.get(series.resourceId);
+    if (!f) continue;
+    available += f.available;
+    bound += f.bound;
+  }
+
+  return (
+    <div className="totals">
+      <div className="totals__head totals__grid--two">
+        <span />
+        <MeasureLabel measure="approved">verfügbar</MeasureLabel>
+        <MeasureLabel measure="planned">gebunden</MeasureLabel>
+      </div>
+      <div className="totals__block totals__row--sum">
+        <div className="totals__grid totals__grid--two">
+          <span>Alle Personen</span>
+          <span className="mono">{formatValue(available, 'PT')}</span>
+          <span className="mono">{formatValue(bound, 'PT')}</span>
+        </div>
+        <UtilisationBar planned={bound} actual={bound} ceiling={available} />
+      </div>
+    </div>
+  );
+}
+
+interface Sums {
+  /** Genehmigt: die Obergrenzen; unbegrenzt schlägt auf die Summe durch. */
+  approved: Ceiling;
+  planned: number;
+  actual: number;
+}
+
 function ConditionList() {
   const { client, commitClient } = useStore();
+  const order = useReorder((from, to) =>
+    commitClient('Bedingungen umsortiert', (c) => moveItem(c.conditions, from, to)),
+  );
+
   return (
     <div className="col">
-      {client.conditions.map((condition) => (
-        <div key={condition.id} className="row">
-          <Switch
-            checked={condition.met}
-            label={condition.name}
-            onChange={(met) =>
-              commitClient(met ? 'Bedingung erfüllt' : 'Bedingung offen', (c) => {
-                const target = c.conditions.find((x) => x.id === condition.id);
-                if (target) target.met = met;
-              })
-            }
-          />
-          <div className="spacer" />
-          <Button
-            size="sm"
-            variant="ghost"
-            title="Bedingung löschen"
-            onClick={() =>
-              commitClient('Bedingung gelöscht', (c) => {
-                c.conditions = c.conditions.filter((x) => x.id !== condition.id);
-                for (const t of c.tasks) t.conditionIds = t.conditionIds.filter((id) => id !== condition.id);
-              })
-            }
+      <div className="list">
+        {client.conditions.map((condition, index) => (
+          <div
+            key={condition.id}
+            className="list__item list__item--sortable sortable"
+            title="Ziehen zum Umsortieren"
+            {...order.itemProps(index)}
           >
-            &times;
-          </Button>
-        </div>
-      ))}
-      {client.conditions.length === 0 && (
-        <span className="faint">Bedingungen entstehen beim Erfassen in einer Aufgabe.</span>
-      )}
+            <span className="list__grip" aria-hidden="true">
+              ⠿
+            </span>
+            <Switch
+              checked={condition.met}
+              onChange={(met) =>
+                commitClient(met ? 'Bedingung erfüllt' : 'Bedingung offen', (c) => {
+                  const target = c.conditions.find((x) => x.id === condition.id);
+                  if (target) target.met = met;
+                })
+              }
+            />
+            <span className="grow" style={{ minWidth: 0 }}>
+              <TextInput
+                value={condition.name}
+                placeholder="Bedingung"
+                onChange={(name) =>
+                  commitClient('Bedingung umbenannt', (c) => {
+                    const target = c.conditions.find((x) => x.id === condition.id);
+                    if (target) target.name = name;
+                  }, { coalesceKey: `condition-${condition.id}` })
+                }
+              />
+            </span>
+            <Button
+              size="sm"
+              variant="ghost"
+              icon
+              title="Bedingung löschen; Verweise in Aufgaben werden entfernt"
+              onClick={() =>
+                commitClient('Bedingung gelöscht', (c) => {
+                  c.conditions = c.conditions.filter((x) => x.id !== condition.id);
+                  for (const t of c.tasks) t.conditionIds = t.conditionIds.filter((id) => id !== condition.id);
+                })
+              }
+            >
+              &times;
+            </Button>
+          </div>
+        ))}
+        {client.conditions.length === 0 && (
+          <span className="faint">Noch keine Bedingungen.</span>
+        )}
+      </div>
+
+      <Button
+        size="sm"
+        onClick={() => {
+          const condition = createCondition();
+          commitClient('Bedingung angelegt', (c) => {
+            c.conditions.push(condition);
+          });
+        }}
+      >
+        + Bedingung
+      </Button>
     </div>
   );
 }

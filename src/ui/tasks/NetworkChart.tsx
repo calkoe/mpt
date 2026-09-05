@@ -24,7 +24,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Client, Id, Task } from '../../model/types';
-import { TASK_STATUS_LABEL } from '../../model/types';
+import { checklistProgress, TASK_STATUS_LABEL } from '../../model/types';
 import {
   edgePath,
   hasManualLayout,
@@ -35,16 +35,18 @@ import {
   type LayoutNode,
 } from '../../engine/layout';
 import { formatDateDe } from '../../engine/dates';
-import { wouldCreateCycle, type ScheduleResult } from '../../engine/schedule';
+import { formatDuration, wouldCreateCycle, type ScheduleResult } from '../../engine/schedule';
 import type { Warning } from '../../engine/validate';
 import { createFollowUp, createPredecessor } from '../../model/factory';
 import { usePreferences } from '../../state/preferences';
 import { useStore } from '../../state/store';
-import { RAIL_HEIGHT, ResourceRailLayer, type RailAnchor } from './ResourceRailLayer';
+import { countRailBlocks, railHeight, ResourceRailLayer, type RailAnchor } from './ResourceRailLayer';
 import { useZoomPan } from '../components/useZoomPan';
 import { Button, ConfirmButton } from '../components/controls';
 import { ExportPngButton } from '../components/ExportPngButton';
+import { ChartToolbar, ZoomControls } from '../components/ChartToolbar';
 import { TagBadges } from './TagBadges';
+import { fitText, fontOf } from '../components/measureText';
 
 export function NetworkChart({
   client,
@@ -78,7 +80,9 @@ export function NetworkChart({
   const tagById = useMemo(() => new Map(client.tags.map((t) => [t.id, t])), [client.tags]);
 
   const showRail = prefs.showResourceRail;
-  const contentHeight = layout.height + (showRail ? RAIL_HEIGHT : 0);
+  // Die Leiste bricht bei vielen Ressourcen um und wird dadurch hoeher.
+  const contentHeight =
+    layout.height + (showRail ? railHeight(countRailBlocks(client, tasks), layout.width) : 0);
 
   /**
    * Automatisch einpassen, solange der Nutzer nicht selbst gezoomt hat.
@@ -233,27 +237,24 @@ export function NetworkChart({
         </div>
       )}
 
-      {/* Zoom-Steuerung */}
-      <div className="viz__controls">
-        <Button size="sm" icon onClick={() => zoom.zoomBy(1 / 1.25)} title="Herauszoomen">
-          &minus;
-        </Button>
-        <span className="viz__zoomlevel mono" title="Aktueller Zoom">
-          {Math.round(zoom.scale * 100)}%
-        </span>
-        <Button size="sm" icon onClick={() => zoom.zoomBy(1.25)} title="Hineinzoomen">
-          +
-        </Button>
-        <Button
-          size="sm"
-          onClick={() => {
-            lastFit.current = '';
-            zoom.reset();
+      {/*
+        Bedienelemente stehen oben in der Werkzeugleiste, nicht auf der
+        Zeichenflaeche - siehe ChartToolbar. Gerendert werden sie hier, weil
+        nur das Diagramm seine Zoomstufe und sein SVG kennt.
+      */}
+      <ChartToolbar>
+        <ZoomControls
+          fitTitle="Gesamten Plan wieder einpassen"
+          zoom={{
+            scale: zoom.scale,
+            zoomBy: zoom.zoomBy,
+            adjusted: zoom.userAdjusted,
+            fit: () => {
+              lastFit.current = '';
+              zoom.reset();
+            },
           }}
-          title="Gesamten Plan wieder einpassen"
-        >
-          Einpassen
-        </Button>
+        />
         <Button
           size="sm"
           disabled={!ui.selectedTaskId || !nodeById.has(ui.selectedTaskId)}
@@ -275,7 +276,7 @@ export function NetworkChart({
           </ConfirmButton>
         )}
         <ExportPngButton svgRef={svgRef} namePrefix="mpt-netzplan" />
-      </div>
+      </ChartToolbar>
 
       <svg ref={svgRef} width="100%" height="100%" role="img" aria-label="Netzplan der Aufgaben">
         <defs>
@@ -434,13 +435,15 @@ function NodeView({
   const task = node.task;
   const critical = showCritical && st?.critical && !st.openEnded;
   const statusColor = `var(--status-${task.status})`;
+  const progress = checklistProgress(task);
 
   const tooltip = [
     task.milestone ? `${task.title} (Meilenstein)` : task.title,
     `Status: ${TASK_STATUS_LABEL[task.status]}`,
     st ? `${formatDateDe(st.start)} - ${st.openEnded ? 'offen' : formatDateDe(st.end)}` : '',
-    st && !st.openEnded ? `Dauer: ${st.duration} AT · Puffer: ${st.slack} AT${st.critical ? ' (kritischer Pfad)' : ''}` : '',
+    st && !st.openEnded ? `Dauer: ${formatDuration(st)} · Puffer: ${st.slack} AT${st.critical ? ' (kritischer Pfad)' : ''}` : '',
     costProgress !== null ? `Kosten abgerufen: ${Math.round(costProgress * 100)} %` : '',
+    progress ? `Checkliste: ${progress.done} von ${progress.total} erledigt` : '',
     ...warnings.map((w) => `! ${w.text}`),
     'Doppelklick zoomt heran',
   ]
@@ -527,14 +530,28 @@ function NodeView({
       ) : (
         <circle cx={16} cy={16} r={4} fill={statusColor} />
       )}
-      <text className="node__title" x={26} y={20}>
-        {truncate(task.title, 25)}
+      {/*
+        Der Titel wird auf die tatsaechlich verfuegbare Breite gemessen, nicht
+        auf eine feste Zeichenzahl gekuerzt: "Freigabe durch Lenkungskreis"
+        besteht aus schmalen Buchstaben und passt laenger als "MW-Ausbau WWW".
+        Nach Zeichen gezaehlt lief das eine zu frueh ab und das andere ueber
+        den Rand hinaus.
+      */}
+      <text className="node__title" x={TITLE_X} y={TITLE_BASELINE}>
+        {fitText(task.title, node.width - TITLE_X - (warnings.length > 0 ? 26 : 12), fontOf(NODE_TITLE_FONT))}
       </text>
-      <text className="node__meta" x={12} y={38}>
+      <text className="node__meta" x={12} y={META_BASELINE}>
         {st ? `${formatDateDe(st.start)} → ${st.openEnded ? 'offen' : formatDateDe(st.end)}` : '-'}
       </text>
-      <text className="node__meta" x={12} y={47}>
-        {st && !st.openEnded ? `${st.duration} AT` : 'Dauerläufer'}
+      {/* Fortschritt aus der Checkliste - nur bei Aufgaben in Arbeit. */}
+      {progress && (
+        <text className="node__progress" x={node.width - 12} y={META_BASELINE} textAnchor="end">
+          <title>{`${progress.done} von ${progress.total} Punkten erledigt`}</title>
+          {progress.done}/{progress.total}
+        </text>
+      )}
+      <text className="node__meta" x={12} y={META_BASELINE + META_LINE}>
+        {st && !st.openEnded ? formatDuration(st) : 'Dauerläufer'}
         {st && !st.openEnded && st.slack > 0 ? ` · Puffer ${st.slack}` : ''}
         {critical ? ' · kritisch' : ''}
       </text>
@@ -544,15 +561,15 @@ function NodeView({
         die Flaeche stark abgeschwaecht. So bleibt der Name lesbar, egal wie
         hell oder dunkel die Tag-Farbe ist.
       */}
-      <TagBadges tags={tags} y={node.height - 17} available={node.width - 24} />
+      <TagBadges tags={tags} y={TAGS_TOP} available={node.width - 24} />
 
       {warnings.length > 0 && (
-        <text x={node.width - 16} y={20} fill="var(--warn)" fontSize={13}>
+        <text x={node.width - 16} y={TITLE_BASELINE} fill="var(--warn)" fontSize={13}>
           &#9888;
         </text>
       )}
       {st?.openEnded && (
-        <text x={node.width - 16} y={47} fill="var(--info)" fontSize={11} textAnchor="end">
+        <text x={node.width - 16} y={META_BASELINE + META_LINE} fill="var(--info)" fontSize={11} textAnchor="end">
           ∞
         </text>
       )}
@@ -708,6 +725,25 @@ function useNodeDrag({
   return { start };
 }
 
-function truncate(text: string, max: number): string {
-  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
-}
+/*
+ * Senkrechter Aufbau eines Knotens.
+ *
+ * Titel, die beiden Metazeilen und die Tag-Marken standen vorher in
+ * ungleichen Abstaenden untereinander - der Block wirkte dadurch schief.
+ * Diese Konstanten legen einen gleichmaessigen Rhythmus fest: gleicher
+ * Abstand ueber dem Titel wie unter den Marken, und zwischen den Gruppen
+ * jeweils derselbe Zwischenraum.
+ */
+/** Linke Kante des Titels - hinter dem Statuspunkt. */
+const TITLE_X = 28;
+const TITLE_BASELINE = 19;
+const META_BASELINE = 37;
+const META_LINE = 12;
+/**
+ * Obere Kante der Markenzeile. Der Abstand zur letzten Metazeile ist derselbe
+ * wie zwischen Titel und Metazeilen, und oben wie unten bleibt gleich viel
+ * Rand (NODE_HEIGHT ist darauf abgestimmt).
+ */
+const TAGS_TOP = 58;
+const NODE_TITLE_FONT = '600 12px';
+

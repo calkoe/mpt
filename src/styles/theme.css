@@ -46,6 +46,11 @@
   --topbar-h: 34px;
   /* Gemeinsame Höhe von Titelfeld und Statusblock im Aufgaben-Editor. */
   --titlerow-h: 34px;
+  /*
+   * Breite der rechten Spalte im Aufgaben-Editor: Statusauswahl und
+   * Verknüpfungsblock teilen sie sich, damit die rechte Kante durchläuft.
+   */
+  --sidecol-w: 344px;
 
   /* Flaechen */
   --bg: #f6f7f9;
@@ -92,6 +97,16 @@
   --status-done: #1c7c59;
 
   /* Diagramme (dekorativ, daher bewusst zurückhaltend) */
+  /*
+   * Editorflaechen. Im hellen Schema liegt der ruhige Abschnitt oben (weiss)
+   * und der einzelne Eintrag darin abgesetzt - im dunklen genau andersherum,
+   * weil dort "heller" fuer "naeher" steht. Vorher galt in beiden Schemata
+   * dieselbe Zuordnung, wodurch die Editoren im Hellen wie ein Negativ
+   * wirkten: dunkler Grund, helle Kaesten.
+   */
+  --editor-section: var(--surface);
+  --editor-item: var(--surface-2);
+
   --grid-line: #e8ebf0;
   --grid-line-strong: #b4b9c3;
   --chart-fill: rgba(53, 89, 217, 0.18);
@@ -137,6 +152,9 @@
   --status-active: #6b8dff;
   --status-operations: #2f9d78;
   --status-done: #52c69a;
+
+  --editor-section: var(--surface-2);
+  --editor-item: var(--surface);
 
   --grid-line: #262b34;
   --grid-line-strong: #454b56;

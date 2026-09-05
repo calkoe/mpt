@@ -12,9 +12,12 @@ import { Button } from './controls';
 
 export function ExportPngButton({
   svgRef,
+  overlayRef,
   namePrefix,
 }: {
   svgRef: RefObject<SVGSVGElement>;
+  /** Mitgeführte Ebene, die im Bild darüberliegt (Gantt: Titelspalte + Leiste). */
+  overlayRef?: RefObject<SVGSVGElement>;
   namePrefix: string;
 }) {
   const { resolvedTheme } = usePreferences();
@@ -30,6 +33,7 @@ export function ExportPngButton({
         // Ohne deckenden Hintergrund wäre helle Schrift auf Transparenz später
         // unlesbar - deshalb die Flächenfarbe des aktiven Themes.
         background: resolvedTheme === 'dark' ? '#171a21' : '#ffffff',
+        overlay: overlayRef?.current,
       });
       if (result.clipped) setStatus({ kind: 'clipped' });
     } catch (e) {

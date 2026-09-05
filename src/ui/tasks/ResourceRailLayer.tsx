@@ -17,8 +17,55 @@ import { formatValue } from '../../engine/resources';
 import type { Warning } from '../../engine/validate';
 import { useStore } from '../../state/store';
 import { TagBadges, type BadgeTag } from './TagBadges';
+import { fitText, fontOf } from '../components/measureText';
 
+/** Kopfzeile der Leiste: Trennlinie und Beschriftung über den Blöcken. */
+const RAIL_HEAD = 34;
+/** Grundhöhe mit einer Blockreihe. */
 export const RAIL_HEIGHT = 108;
+
+/**
+ * Wieviele Blöcke nebeneinander passen und wie hoch die Leiste dadurch wird.
+ *
+ * Bei vielen Ressourcen liefen die Blöcke früher rechts aus dem Bild - im
+ * Gantt umso schneller, weil die Leiste dort nur die sichtbare Breite hat und
+ * nicht mitscrollt. Sie brechen deshalb um; die Leiste wächst mit.
+ */
+export function railLayout(count: number, width: number, offsetX = 0) {
+  const available = Math.max(MIN_BLOCK_WIDTH, width - offsetX - BLOCK_GAP);
+  const perRow = Math.max(1, Math.floor(available / (MIN_BLOCK_WIDTH + BLOCK_GAP)));
+  const rows = Math.max(1, Math.ceil(count / perRow));
+  const blockWidth = Math.max(MIN_BLOCK_WIDTH, Math.min(180, available / perRow - BLOCK_GAP));
+  return { perRow, rows, blockWidth };
+}
+
+/**
+ * Wieviele Blöcke die Leiste zeigen wird - die Diagramme müssen ihre Höhe
+ * kennen, bevor sie zeichnen. Gezählt werden dieselben Quellen wie unten:
+ * zugeordnete Personen, belastete Budgets und verknüpfte Bedingungen.
+ */
+export function countRailBlocks(client: Client, tasks: Task[]): number {
+  const ids = new Set<Id>();
+  for (const task of tasks) {
+    for (const a of task.assignments) {
+      if (client.people.some((p) => p.id === a.personId)) ids.add(a.personId);
+    }
+    for (const c of task.costs) {
+      if (client.budgets.some((b) => b.id === c.budgetId)) ids.add(c.budgetId);
+    }
+    for (const id of task.conditionIds) {
+      if (client.conditions.some((x) => x.id === id)) ids.add(id);
+    }
+  }
+  return ids.size;
+}
+
+/** Höhe, die die Leiste für `count` Blöcke braucht. */
+export function railHeight(count: number, width: number, offsetX = 0): number {
+  if (count === 0) return RAIL_HEIGHT;
+  const { rows } = railLayout(count, width, offsetX);
+  return RAIL_HEAD + rows * (BLOCK_HEIGHT + BLOCK_GAP) + BLOCK_GAP;
+}
 /** Hoeher als frueher: unter den Kennzahlen ist Platz fuer die Tag-Marken. */
 const BLOCK_HEIGHT = 50;
 
@@ -36,6 +83,8 @@ const BLOCK_GAP = 12;
 const MIN_BLOCK_WIDTH = 118;
 /** Linke Kante des Textes - lässt Platz für das Symbol der Ressourcenart. */
 const TEXT_X = 30;
+/** Luft zwischen Text und rechter Blockkante. */
+const TEXT_PADDING = 10;
 
 export interface RailAnchor {
   taskId: Id;
@@ -56,6 +105,8 @@ interface RailBlock {
   /** Grenzwert überschritten bzw. Bedingung nicht erfüllt. */
   alert: boolean;
   x: number;
+  /** Zeile innerhalb der Leiste - bei vielen Ressourcen brechen die Blöcke um. */
+  row: number;
   width: number;
 }
 
@@ -77,6 +128,7 @@ export function ResourceRailLayer({
   anchors,
   top,
   width,
+  offsetX = 0,
   resourceWarnings,
   highlighted,
   onHighlight,
@@ -87,6 +139,12 @@ export function ResourceRailLayer({
   /** Y-Koordinate, ab der die Leiste gezeichnet wird. */
   top: number;
   width: number;
+  /**
+   * Linker Rand der Bloecke. Im Gantt beginnt die Leiste erst hinter der festen
+   * Beschriftungsspalte: sonst liefen die Verbindungslinien nach links unter
+   * die Spalte und waeren dort verdeckt.
+   */
+  offsetX?: number;
   resourceWarnings: Map<Id, Warning[]>;
   /** Aktuell hervorgehobene Aufgaben; null = keine Hervorhebung. */
   highlighted: Set<Id> | null;
@@ -166,8 +224,7 @@ export function ResourceRailLayer({
     }
 
     const list = [...map.entries()];
-    const available = Math.max(0, width - BLOCK_GAP);
-    const blockWidth = Math.max(MIN_BLOCK_WIDTH, Math.min(180, available / Math.max(1, list.length) - BLOCK_GAP));
+    const { perRow, blockWidth } = railLayout(list.length, width, offsetX);
 
     return list.map(([id, entry], index) => ({
       id,
@@ -182,15 +239,16 @@ export function ResourceRailLayer({
       tags: entry.tags,
       taskIds: [...new Set(entry.taskIds)],
       alert: entry.alert || (resourceWarnings.get(id)?.length ?? 0) > 0,
-      x: BLOCK_GAP + index * (blockWidth + BLOCK_GAP),
+      x: offsetX + BLOCK_GAP + (index % perRow) * (blockWidth + BLOCK_GAP),
+      row: Math.floor(index / perRow),
       width: blockWidth,
     }));
-  }, [client.budgets, client.conditions, client.people, resourceWarnings, tasks, width]);
+  }, [client.budgets, client.conditions, client.people, resourceWarnings, tasks, width, offsetX]);
 
   if (blocks.length === 0) return null;
 
   const anchorById = new Map(anchors.map((a) => [a.taskId, a]));
-  const blockY = top + 34;
+  const blockY = (block: RailBlock) => top + RAIL_HEAD + block.row * (BLOCK_HEIGHT + BLOCK_GAP);
 
   const activate = (block: RailBlock) => {
     if (block.kind === 'condition') {
@@ -207,7 +265,7 @@ export function ResourceRailLayer({
   return (
     <g className="rail-layer">
       <line x1={0} y1={top + 6} x2={width} y2={top + 6} className="chart__gridline" />
-      <text x={BLOCK_GAP} y={top + 24} className="chart__tick">
+      <text x={offsetX + BLOCK_GAP} y={top + 24} className="chart__tick">
         Ressourcen und Bedingungen dieser Aufgaben
       </text>
 
@@ -223,7 +281,7 @@ export function ResourceRailLayer({
             <path
               key={`${block.id}-${taskId}`}
               className={`edge edge--rail${lit ? ' edge--lit' : ''}`}
-              d={railPath(anchor.x, anchor.y, block.x + block.width / 2, blockY)}
+              d={railPath(anchor.x, anchor.y, block.x + block.width / 2, blockY(block))}
               opacity={lit ? 0.9 : highlighted ? 0.08 : 0.18}
               stroke={lit ? 'var(--accent)' : undefined}
             />
@@ -239,7 +297,7 @@ export function ResourceRailLayer({
             key={block.id}
             data-node={block.id}
             className={`rail-block${lit ? ' rail-block--lit' : ''}${highlighted && !lit ? ' rail-block--dim' : ''}`}
-            transform={`translate(${block.x},${blockY})`}
+            transform={`translate(${block.x},${blockY(block)})`}
             onClick={() => activate(block)}
             onMouseEnter={() => onHighlight(new Set(block.taskIds))}
             onMouseLeave={() => onHighlight(null)}
@@ -263,11 +321,12 @@ export function ResourceRailLayer({
             {/* Ohne Tags sitzt der Inhalt mittig statt oben - siehe oben. */}
             <g transform={`translate(0,${contentOffset(block.tags.length > 0)})`}>
               <KindIcon kind={block.kind} alert={block.alert} />
+              {/* Breite messen statt Zeichen zaehlen - sonst ragt der Titel heraus. */}
               <text x={TEXT_X} y={15} className="node__title" fontSize={11}>
-                {truncate(block.label, Math.floor((block.width - TEXT_X) / 6))}
+                {fitText(block.label, block.width - TEXT_X - TEXT_PADDING, fontOf('600 11px'))}
               </text>
               <text x={TEXT_X} y={27} className="node__meta">
-                {block.detail}
+                {fitText(block.detail, block.width - TEXT_X - TEXT_PADDING, fontOf('9px'))}
               </text>
               {/* Tags identisch zu den Aufgabenknoten. */}
               <TagBadges tags={block.tags} y={33} available={block.width - TEXT_X - 8} startX={TEXT_X - 8} />
@@ -335,8 +394,4 @@ function KindIcon({ kind, alert }: { kind: BlockKind; alert: boolean }) {
       )}
     </g>
   );
-}
-
-function truncate(text: string, max: number): string {
-  return text.length > max ? `${text.slice(0, Math.max(1, max - 1))}…` : text;
 }

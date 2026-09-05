@@ -582,3 +582,77 @@ Migration 3 -> 4 ergänzt sie leer.
   Kopie und Neuberechnung. Nachgemessen: 21 Reglerschritte erzeugen **null** Neuberechnungen, ein
   Commit beim Loslassen. Gilt für alle Regler - Dauer, FTE, Obergrenzen, Anteil.
 
+
+
+## v1.4.0 — Kalenderdauern, Geld in drei Grössen, Feinschliff
+
+**Schema 5.** Dauern bekommen eine Einheit (`durationUnit`). Bestandsdaten waren
+Arbeitstage und heissen ab jetzt ausdrücklich so — die Migration ändert keine Zahl.
+
+**Rechnen**
+
+- Nur `AT` zählt Arbeitstage. Wochen, Monate, Quartale und Jahre sind **Kalenderzeit**:
+  eine Aufgabe über fünf Jahre ab dem 01.01. endet am 31.12. des fünften Jahres.
+- **Kritischer Pfad repariert.** Die Rückwärtsrechnung nahm den spätesten statt des
+  frühesten Nachfolgers; dadurch bekam jede Aufgabe Puffer und der Pfad verschwand.
+- Wiederkehrende Kosten werden am ersten Tag ihres Rasters gebucht (Monats-, Quartals-,
+  Jahresbeginn) und ausschliesslich innerhalb der Aufgabenlaufzeit. Liegt die Aufgabe
+  quer zum Raster, wird gewarnt.
+- Budget-Obergrenzen setzen sich aus Basiswert und Zeitraumwerten zusammen (`budgetCeiling`);
+  bei beidem gilt die engere Grenze.
+- Warnungen entstehen nur aus **abgerufenem** Geld, nicht aus Planwerten. Punktgenau
+  ausgeschöpft ist keine Warnung, sondern ein eigener Zustand — blau statt orange.
+- Die Zeitachse berücksichtigt Zeiträume, für die nur Grenzwerte gepflegt sind.
+- Unfertige Datumseingaben (Jahr "2" beim Tippen von 2027) legen die Anwendung nicht mehr lahm.
+
+**Oberfläche**
+
+- Gantt: Beschriftungsspalte und Ressourcenleiste bleiben beim Scrollen stehen, nur die
+  Balken wandern; in den Ganglinien bleiben beide Achsen stehen. Umgesetzt über
+  `position: sticky` statt eigener Scroll-Logik. Die Zeitachse beginnt auf einer
+  Rastergrenze, Beschriftungen überlagern sich nicht mehr. Zoom, Einpassen und Export
+  sitzen in der Werkzeugleiste - für alle drei Diagramme derselbe Code.
+- Kalenderwoche als Terminstufe; ungetrackte Bedingungen lassen sich in der
+  Ressourcenansicht anlegen und umsortieren; die Ressourcenleiste bricht bei vielen
+  Ressourcen um.
+- Beispielbestand: drei Personen mit Jahresverfügbarkeiten, drei Budgets mit Jahresscheiben
+  und Gesamtdeckeln, teilweise abgerufene Kosten - und wiederkehrende Kosten sauber auf dem
+  Abrechnungsraster.
+- Kennzahlen der Ressourcenlisten beziehen sich auf einen **wählbaren Zeitraum** (Gesamt,
+  Jahr, Quartal, Monat; Voreinstellung: laufendes Jahr). Nur so sind "genehmigt" und
+  "geplant" vergleichbar - über zehn Jahre stünde die Planung eines Dauerläufers neben einer
+  Obergrenze für zwei Jahre. Personen bekommen dieselbe Aufstellung: verfügbare gegen
+  gebundene Personentage.
+- Ganglinien-Kacheln: die Kennzahlen in der Überschrift folgen dem Mauszeiger. Die ganze
+  Kachel öffnet die Detailansicht - auch die der Gesamtsichten; der Details-Knopf entfällt.
+- Wiederkehrende Kosten zeigen als dezente Liste, wann sie tatsächlich abgerufen werden.
+- Aufgaben-Editor: Verknüpfungen als kompakter Block neben der Beschreibung (eine Auswahlliste
+  statt drei), Terminierung und Ressourcen je zur Hälfte, Checkliste darunter.
+- Fortschritt aus der Checkliste (z.B. 1/4) an Netzplan und Gantt - nur bei Aufgaben in Arbeit
+  und nur, wenn es Punkte gibt.
+- Neuer Dialog "Wer arbeitet woran?": alle Personen mit ihren Aufgaben in einem wählbaren
+  Zeitraum, inklusive derer, die nichts zu tun haben.
+- **Gesamtbudget: "keine Obergrenze" ist nicht null.** Fehlt auch nur einem Budget die
+  Grenze, hat die Summe keine - vorher behauptete die Gesamtsicht eine Schranke, die es
+  gar nicht gab. Dazu 20 neue Tests, die die ganze Kette von der Kostenposition bis zur
+  Warnung abdecken (`engine/budget.test.ts`).
+- Hinweis in der Kopfzeile: "Alle Daten lokal auf diesem Rechner".
+- Der heutige Tag liegt in allen Zeitdiagrammen im linken Viertel.
+- Genehmigt (▢), geplant (○) und ausgegeben (●) tragen überall dasselbe Zeichen. Ist eine
+  Obergrenze unbegrenzt, ist es auch die Summe darüber.
+- Ganglinien gegliedert: Gesamtsichten, Personen, Budgets - durch feine Linien getrennt.
+- Terminierung: "Beginn der Aufgabe" plus Dauer, alternativ taggenau - nie beides gleichzeitig.
+- Checklisten-Haken rund, grün und mit Zeitstempel (Schema 6).
+- Ein gemeinsamer Mechanismus verzögert **alle** Eingaben um 1 s bis zur Neuberechnung.
+- Zahlenfelder mit Tausenderpunkten, leerem Feld statt einer störenden 0 und Pfeiltasten.
+- Termine lassen sich in Jahr / Quartal / Monat setzen; taggenau kostet einen Klick mehr.
+- Gantt: Statusfarben statt Tagfärbung, Tags als Marken, ziehbare erste Spalte,
+  Verschieben rastet auf das gewählte Zeitraster ein.
+- Kostendiagramme zeigen geplant und ausgegeben als ineinanderliegende Balken.
+- Budgetübersicht mit Auslastungsbalken; alle Summen getrennt nach genehmigt, geplant
+  und ausgegeben, in der Tabelle umschaltbar.
+- Gesamtbudget und Gesamt-FTE als eigene Ganglinien.
+- Personalzuordnungen sind von beiden Seiten bearbeitbar (`AssignmentFields`) — wie die Kosten.
+- Vorhaben bearbeiten liegt hinter einem Pfeil, der nur am gewählten Vorhaben erscheint.
+- Heller Modus: Kontrast in den Editoren gedreht. Warnsymbol neutral und ohne Zahl.
+  Speicherstatus mit "lokal" und blauem Warten. Netzplan-Titel werden gemessen statt gezählt.

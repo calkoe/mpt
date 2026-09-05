@@ -238,6 +238,33 @@ describe('Migration', () => {
     expect(cost.actualAmount).toBe(40);
   });
 
+  it('erklaert bestehende Dauern zu Arbeitstagen (Schema 4 -> 5)', () => {
+    const result = migrate({
+      schemaVersion: 4,
+      clients: [
+        {
+          id: 'c1',
+          name: 'X',
+          ventures: [{ id: 'v1', name: 'V' }],
+          tasks: [
+            {
+              id: 't1',
+              ventureId: 'v1',
+              title: 'A',
+              schedule: { anchor: 'date', start: '2026-01-05', durationMin: 10, durationMax: 15 },
+            },
+          ],
+        },
+      ],
+    });
+    const schedule = result.db.clients[0].tasks[0].schedule;
+    // Die Zahlen bleiben, sie heissen ab jetzt nur ausdruecklich Arbeitstage -
+    // alles andere wuerde bestehende Plaene stillschweigend verschieben.
+    expect(schedule.durationMin).toBe(10);
+    expect(schedule.durationMax).toBe(15);
+    expect(schedule.durationUnit).toBe('days');
+  });
+
   it('verwirft unvollstaendige Sperrvermerke, statt die Datei zu blockieren', () => {
     expect(migrate({ schemaVersion: CURRENT_SCHEMA_VERSION, clients: [], lock: { holder: 'X' } }).db.lock).toBeNull();
     const gueltig = migrate({

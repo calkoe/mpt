@@ -4,17 +4,28 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  addDays,
   addWorkdays,
   buildBuckets,
+  diffDays,
+  today,
   isWorkday,
-  unitToWorkdays,
+  subDuration,
   workdaysBetween,
   workdaysIn,
-  workdaysToUnit,
+  addDuration,
   yearOf,
 } from './dates';
 import { collectNeighbourhood, computeSchedule, wouldCreateCycle } from './schedule';
-import { budgetDailyLoad, budgetSeries, EMPTY_FILTER, periodValueAt, personDailyLoad, personSeries } from './resources';
+import {
+  budgetCeiling,
+  budgetDailyLoad,
+  budgetSeries,
+  EMPTY_FILTER,
+  periodValueAt,
+  personDailyLoad,
+  personSeries,
+} from './resources';
 import { resourceWarnings, taskWarnings } from './validate';
 import { createBudget, createClient, createPerson, createTask, createVenture } from '../model/factory';
 import type { Client, Task } from '../model/types';
@@ -74,11 +85,11 @@ describe('Arbeitstags-Mathematik', () => {
 describe('Terminierung', () => {
   it('setzt Nachfolger auf den Arbeitstag nach dem Vorgängerende', () => {
     const { client, venture } = buildClient();
-    const a = addTask(client, venture, { title: 'A', schedule: { anchor: 'date', start: MON, durationMin: 5, durationMax: 5 } });
+    const a = addTask(client, venture, { title: 'A', schedule: { anchor: 'date', start: MON, durationMin: 5, durationMax: 5, durationUnit: 'days' } });
     addTask(client, venture, {
       title: 'B',
       dependsOn: [a.id],
-      schedule: { anchor: 'dependency', durationMin: 3, durationMax: 3 },
+      schedule: { anchor: 'dependency', durationMin: 3, durationMax: 3, durationUnit: 'days' },
     });
 
     const schedule = computeSchedule(client, 'max');
@@ -89,12 +100,12 @@ describe('Terminierung', () => {
 
   it('nimmt bei mehreren Vorgängern das späteste Ende', () => {
     const { client, venture } = buildClient();
-    const a = addTask(client, venture, { title: 'A', schedule: { anchor: 'date', start: MON, durationMin: 2, durationMax: 2 } });
-    const b = addTask(client, venture, { title: 'B', schedule: { anchor: 'date', start: MON, durationMin: 8, durationMax: 8 } });
+    const a = addTask(client, venture, { title: 'A', schedule: { anchor: 'date', start: MON, durationMin: 2, durationMax: 2, durationUnit: 'days' } });
+    const b = addTask(client, venture, { title: 'B', schedule: { anchor: 'date', start: MON, durationMin: 8, durationMax: 8, durationUnit: 'days' } });
     addTask(client, venture, {
       title: 'C',
       dependsOn: [a.id, b.id],
-      schedule: { anchor: 'dependency', durationMin: 1, durationMax: 1 },
+      schedule: { anchor: 'dependency', durationMin: 1, durationMax: 1, durationUnit: 'days' },
     });
 
     const schedule = computeSchedule(client, 'max');
@@ -106,7 +117,7 @@ describe('Terminierung', () => {
 
   it('unterscheidet optimistisches und pessimistisches Szenario', () => {
     const { client, venture } = buildClient();
-    addTask(client, venture, { title: 'A', schedule: { anchor: 'date', start: MON, durationMin: 4, durationMax: 7 } });
+    addTask(client, venture, { title: 'A', schedule: { anchor: 'date', start: MON, durationMin: 4, durationMax: 7, durationUnit: 'days' } });
 
     expect(computeSchedule(client, 'min').ordered[0].duration).toBe(4);
     expect(computeSchedule(client, 'max').ordered[0].duration).toBe(7);
@@ -117,28 +128,28 @@ describe('Terminierung', () => {
     const { client, venture } = buildClient();
     addTask(client, venture, {
       title: 'A',
-      schedule: { anchor: 'date', start: MON, end: '2026-01-09', durationMin: 99, durationMax: 99 },
+      schedule: { anchor: 'date', start: MON, end: '2026-01-09', durationMin: 99, durationMax: 99, durationUnit: 'days' },
     });
     expect(computeSchedule(client, 'max').ordered[0].duration).toBe(5);
   });
 
   it('markiert den kritischen Pfad und weist Puffer aus', () => {
     const { client, venture } = buildClient();
-    const start = addTask(client, venture, { title: 'Start', schedule: { anchor: 'date', start: MON, durationMin: 2, durationMax: 2 } });
+    const start = addTask(client, venture, { title: 'Start', schedule: { anchor: 'date', start: MON, durationMin: 2, durationMax: 2, durationUnit: 'days' } });
     const lang = addTask(client, venture, {
       title: 'Lang',
       dependsOn: [start.id],
-      schedule: { anchor: 'dependency', durationMin: 10, durationMax: 10 },
+      schedule: { anchor: 'dependency', durationMin: 10, durationMax: 10, durationUnit: 'days' },
     });
     const kurz = addTask(client, venture, {
       title: 'Kurz',
       dependsOn: [start.id],
-      schedule: { anchor: 'dependency', durationMin: 2, durationMax: 2 },
+      schedule: { anchor: 'dependency', durationMin: 2, durationMax: 2, durationUnit: 'days' },
     });
     addTask(client, venture, {
       title: 'Ende',
       dependsOn: [lang.id, kurz.id],
-      schedule: { anchor: 'dependency', durationMin: 1, durationMax: 1 },
+      schedule: { anchor: 'dependency', durationMin: 1, durationMax: 1, durationUnit: 'days' },
     });
 
     const schedule = computeSchedule(client, 'max');
@@ -153,12 +164,12 @@ describe('Terminierung', () => {
     const { client, venture } = buildClient();
     const a = addTask(client, venture, {
       title: 'A',
-      schedule: { anchor: 'date', start: MON, durationMin: 5, durationMax: 5 },
+      schedule: { anchor: 'date', start: MON, durationMin: 5, durationMax: 5, durationUnit: 'days' },
     });
     const b = addTask(client, venture, {
       title: 'B',
       dependsOn: [a.id],
-      schedule: { anchor: 'dependency', durationMin: 5, durationMax: 5 },
+      schedule: { anchor: 'dependency', durationMin: 5, durationMax: 5, durationUnit: 'days' },
     });
 
     const schedule = computeSchedule(client, 'max');
@@ -171,11 +182,11 @@ describe('Terminierung', () => {
 
   it('erkennt Zyklen und terminiert die übrigen Aufgaben trotzdem', () => {
     const { client, venture } = buildClient();
-    const a = addTask(client, venture, { title: 'A', schedule: { anchor: 'dependency', durationMin: 1, durationMax: 1 } });
-    const b = addTask(client, venture, { title: 'B', schedule: { anchor: 'dependency', durationMin: 1, durationMax: 1 } });
+    const a = addTask(client, venture, { title: 'A', schedule: { anchor: 'dependency', durationMin: 1, durationMax: 1, durationUnit: 'days' } });
+    const b = addTask(client, venture, { title: 'B', schedule: { anchor: 'dependency', durationMin: 1, durationMax: 1, durationUnit: 'days' } });
     a.dependsOn = [b.id];
     b.dependsOn = [a.id];
-    addTask(client, venture, { title: 'Frei', schedule: { anchor: 'date', start: MON, durationMin: 1, durationMax: 1 } });
+    addTask(client, venture, { title: 'Frei', schedule: { anchor: 'date', start: MON, durationMin: 1, durationMax: 1, durationUnit: 'days' } });
 
     const schedule = computeSchedule(client, 'max');
     expect(schedule.cycles).toHaveLength(2);
@@ -193,24 +204,28 @@ describe('Terminierung', () => {
     expect(wouldCreateCycle(client.tasks, a.id, a.id)).toBe(true);
   });
 
-  it('rechnet zwischen Dauer-Einheiten hin und her', () => {
-    expect(unitToWorkdays(2, 'weeks')).toBe(10);
-    expect(unitToWorkdays(1, 'months')).toBe(21);
-    expect(unitToWorkdays(1, 'years')).toBe(252);
-    // Unter einem ganzen Arbeitstag wird auf 1 aufgerundet.
-    expect(unitToWorkdays(0, 'weeks')).toBe(1);
-    expect(workdaysToUnit(10, 'weeks')).toBe(2);
-    expect(workdaysToUnit(21, 'months')).toBe(1);
-    // Rundlauf bleibt stabil.
-    expect(unitToWorkdays(workdaysToUnit(63, 'months'), 'months')).toBe(63);
+  it('rechnet Kalenderdauern kalendarisch, Arbeitstage in Arbeitstagen', () => {
+    // Der Kern der Sache: fuenf Jahre ab dem 1. Januar enden am 31. Dezember
+    // des fuenften Jahres - kein Abzug von Wochenenden.
+    expect(addDuration('2026-01-01', 5, 'years')).toBe('2030-12-31');
+    expect(addDuration('2026-01-01', 1, 'months')).toBe('2026-01-31');
+    expect(addDuration('2026-01-01', 1, 'quarters')).toBe('2026-03-31');
+    expect(addDuration('2026-01-05', 1, 'weeks')).toBe('2026-01-11');
+    // Arbeitstage zaehlen weiterhin Mo-Fr: Montag + 5 AT endet am Freitag.
+    expect(addDuration('2026-01-05', 5, 'days')).toBe('2026-01-09');
+
+    // Rueckwaerts landet man wieder am Ausgangstag.
+    expect(subDuration('2030-12-31', 5, 'years')).toBe('2026-01-01');
+    expect(subDuration('2026-01-31', 1, 'months')).toBe('2026-01-01');
+    expect(subDuration('2026-01-09', 5, 'days')).toBe('2026-01-05');
   });
 
   it('führt Dauerläufer bis zum Horizontende fort', () => {
     const { client, venture } = buildClient();
-    addTask(client, venture, { title: 'Normal', schedule: { anchor: 'date', start: MON, durationMin: 5, durationMax: 5 } });
+    addTask(client, venture, { title: 'Normal', schedule: { anchor: 'date', start: MON, durationMin: 5, durationMax: 5, durationUnit: 'days' } });
     const betrieb = addTask(client, venture, {
       title: 'Betrieb',
-      schedule: { anchor: 'date', start: MON, durationMin: 0, durationMax: 0 },
+      schedule: { anchor: 'date', start: MON, durationMin: 0, durationMax: 0, durationUnit: 'days' },
     });
 
     const schedule = computeSchedule(client, 'max');
@@ -242,7 +257,7 @@ describe('Ressourcen', () => {
     client.people = [person];
     const task = addTask(client, venture, {
       title: 'A',
-      schedule: { anchor: 'date', start: MON, durationMin: 10, durationMax: 10 },
+      schedule: { anchor: 'date', start: MON, durationMin: 10, durationMax: 10, durationUnit: 'days' },
     });
     task.assignments = [
       { id: 'a1', personId: person.id, mode: 'PT', value: 5, periods: [] },
@@ -271,7 +286,7 @@ describe('Ressourcen', () => {
     client.people = [person];
     const task = addTask(client, venture, {
       title: 'A',
-      schedule: { anchor: 'date', start: MON, durationMin: 5, durationMax: 5 },
+      schedule: { anchor: 'date', start: MON, durationMin: 5, durationMax: 5, durationUnit: 'days' },
     });
     task.assignments = [{ id: 'a1', personId: person.id, mode: 'PT', value: 5, periods: [] }];
 
@@ -287,7 +302,7 @@ describe('Ressourcen', () => {
     client.budgets = [budget];
     const task = addTask(client, venture, {
       title: 'A',
-      schedule: { anchor: 'date', start: '2026-01-01', durationMin: 200, durationMax: 200 },
+      schedule: { anchor: 'date', start: '2026-01-01', durationMin: 200, durationMax: 200, durationUnit: 'days' },
     });
     task.costs = [
       { id: 'c1', budgetId: budget.id, label: 'einmalig', amount: 1000, actualAmount: 0, note: '', recurring: false, interval: 'month', every: 1 },
@@ -312,15 +327,29 @@ describe('Ressourcen', () => {
     client.budgets = [budget];
     const task = addTask(client, venture, {
       title: 'A',
-      schedule: { anchor: 'date', start: MON, durationMin: 5, durationMax: 5 },
+      schedule: { anchor: 'date', start: MON, durationMin: 5, durationMax: 5, durationUnit: 'days' },
     });
     task.costs = [{ id: 'c1', budgetId: budget.id, label: 'teuer', amount: 5000, actualAmount: 0, note: '', recurring: false, interval: 'month', every: 1 }];
 
-    const schedule = computeSchedule(client, 'max');
-    const daily = budgetDailyLoad(client, schedule, EMPTY_FILTER).get(budget.id)!;
-    const series = budgetSeries(budget, daily, { from: '2026-01-01', to: '2026-12-31', granularity: 'year', personUnit: 'FTE' });
-    expect(series.breaches).toHaveLength(1);
-    expect(series.yearly[0]).toMatchObject({ year: 2026, value: 5000 });
+    const options = { from: '2026-01-01', to: '2026-12-31', granularity: 'year' as const, personUnit: 'FTE' as const };
+    const seriesOf = () => {
+      const schedule = computeSchedule(client, 'max');
+      const daily = budgetDailyLoad(client, schedule, EMPTY_FILTER).get(budget.id)!;
+      return budgetSeries(budget, daily, options);
+    };
+
+    // Eine Planung ueber der Obergrenze ist noch keine Ueberschreitung -
+    // gerissen wird ein Budget erst durch das Geld, das abfliesst.
+    const planned = seriesOf();
+    expect(planned.breaches).toHaveLength(0);
+    expect(planned.yearly[0]).toMatchObject({ year: 2026, value: 5000 });
+
+    task.costs[0].actualAmount = 5000;
+    expect(seriesOf().breaches).toHaveLength(1);
+
+    // Genau auf der Grenze ist die Grenze eingehalten.
+    task.costs[0].actualAmount = 1000;
+    expect(seriesOf().breaches).toHaveLength(0);
   });
 
   it('respektiert zeitraumabhängige Werte', () => {
@@ -340,7 +369,7 @@ describe('Ressourcen', () => {
     client.tags = [{ id: 'tag1', name: 'Infra', color: '#000000' }];
     const task = addTask(client, venture, {
       title: 'A',
-      schedule: { anchor: 'date', start: MON, durationMin: 5, durationMax: 5 },
+      schedule: { anchor: 'date', start: MON, durationMin: 5, durationMax: 5, durationUnit: 'days' },
     });
     task.assignments = [{ id: 'a1', personId: person.id, mode: 'FTE', value: 1, periods: [] }];
 
@@ -359,11 +388,11 @@ describe('Warnungen', () => {
     const { client, venture } = buildClient();
     const a = addTask(client, venture, {
       title: 'A',
-      schedule: { anchor: 'date', start: MON, durationMin: 3, durationMax: 3 },
+      schedule: { anchor: 'date', start: MON, durationMin: 3, durationMax: 3, durationUnit: 'days' },
     });
     const b = addTask(client, venture, {
       title: 'B',
-      schedule: { anchor: 'date', start: '2026-03-02', durationMin: 3, durationMax: 3 },
+      schedule: { anchor: 'date', start: '2026-03-02', durationMin: 3, durationMax: 3, durationUnit: 'days' },
     });
     a.parallelWith = [b.id];
 
@@ -378,7 +407,7 @@ describe('Warnungen', () => {
     const task = addTask(client, venture, {
       title: 'A',
       conditionIds: ['c1'],
-      schedule: { anchor: 'date', start: MON, durationMin: 2, durationMax: 2 },
+      schedule: { anchor: 'date', start: MON, durationMin: 2, durationMax: 2, durationUnit: 'days' },
     });
 
     const schedule = computeSchedule(client, 'max');
@@ -395,7 +424,7 @@ describe('Warnungen', () => {
     const task = addTask(client, venture, {
       title: 'Betrieb',
       conditionIds: ['c1'],
-      schedule: { anchor: 'date', start: '2026-06-01', durationMin: 2, durationMax: 2 },
+      schedule: { anchor: 'date', start: '2026-06-01', durationMin: 2, durationMax: 2, durationUnit: 'days' },
     });
 
     const schedule = computeSchedule(client, 'max');
@@ -411,12 +440,12 @@ describe('Warnungen', () => {
     const offen = addTask(client, venture, {
       title: 'Laeuft nicht an',
       status: 'open',
-      schedule: { anchor: 'date', start: MON, durationMin: 5, durationMax: 5 },
+      schedule: { anchor: 'date', start: MON, durationMin: 5, durationMax: 5, durationUnit: 'days' },
     });
     const ueberfaellig = addTask(client, venture, {
       title: 'Laeuft ueber',
       status: 'active',
-      schedule: { anchor: 'date', start: MON, durationMin: 5, durationMax: 5 },
+      schedule: { anchor: 'date', start: MON, durationMin: 5, durationMax: 5, durationUnit: 'days' },
     });
 
     const schedule = computeSchedule(client, 'max');
@@ -442,7 +471,7 @@ describe('Warnungen', () => {
     // Zehn Arbeitstage: Mo 05.01. bis Fr 16.01.2026.
     const task = addTask(client, venture, {
       title: 'A',
-      schedule: { anchor: 'date', start: MON, durationMin: 10, durationMax: 10 },
+      schedule: { anchor: 'date', start: MON, durationMin: 10, durationMax: 10, durationUnit: 'days' },
     });
     task.assignments = [
       {
@@ -478,7 +507,7 @@ describe('Warnungen', () => {
     client.budgets = [budget];
     const task = addTask(client, venture, {
       title: 'A',
-      schedule: { anchor: 'date', start: '2026-01-01', durationMin: 200, durationMax: 200 },
+      schedule: { anchor: 'date', start: '2026-01-01', durationMin: 200, durationMax: 200, durationUnit: 'days' },
     });
     task.costs = [
       { id: 'c1', budgetId: budget.id, label: 'monatlich', amount: 100, actualAmount: 60, note: '', recurring: true, interval: 'month', every: 1 },
@@ -504,7 +533,7 @@ describe('Warnungen', () => {
     expect(lastActual).toBeLessThan(series.cumulativeTotal);
   });
 
-  it('warnt bei Personen und Budgets schon ab 90 Prozent Auslastung', () => {
+  it('warnt bei Personen und Budgets ab 90 Prozent, aber nie bei genau 100', () => {
     const { client, venture } = buildClient();
     const person = createPerson('P');
     person.defaultFte = 1;
@@ -515,16 +544,218 @@ describe('Warnungen', () => {
 
     const task = addTask(client, venture, {
       title: 'A',
-      schedule: { anchor: 'date', start: MON, durationMin: 5, durationMax: 5 },
+      schedule: { anchor: 'date', start: MON, durationMin: 5, durationMax: 5, durationUnit: 'days' },
     });
-    // 0,95 FTE und 950 EUR - beides unter der Grenze, aber ueber 90 Prozent.
+    // 0,95 FTE und 950 EUR abgerufen - beides unter der Grenze, aber ueber
+    // 90 Prozent. Der geplante Betrag liegt daneben und darf nicht zaehlen.
     task.assignments = [{ id: 'a1', personId: person.id, mode: 'FTE', value: 0.95, periods: [] }];
     task.costs = [
-      { id: 'c1', budgetId: budget.id, label: 'K', amount: 950, actualAmount: 0, note: '', recurring: false, interval: 'month', every: 1 },
+      { id: 'c1', budgetId: budget.id, label: 'K', amount: 5000, actualAmount: 950, note: '', recurring: false, interval: 'month', every: 1 },
     ];
 
     const warnings = resourceWarnings(client, computeSchedule(client, 'max'));
     expect(warnings.get(person.id)?.some((w) => w.text.includes('Fast ausgelastet'))).toBe(true);
     expect(warnings.get(budget.id)?.some((w) => w.text.includes('95 %'))).toBe(true);
+
+    // Genau ausgelastet ist der Idealfall und keine Meldung wert.
+    task.assignments[0].value = 1;
+    task.costs[0].actualAmount = 1000;
+    const exact = resourceWarnings(client, computeSchedule(client, 'max'));
+    expect(exact.get(person.id) ?? []).toHaveLength(0);
+    expect(exact.get(budget.id) ?? []).toHaveLength(0);
+  });
+});
+
+describe('Kalenderdauern in der Terminierung', () => {
+  it('lässt eine Jahresaufgabe am Jahresende enden', () => {
+    const { client, venture } = buildClient();
+    const task = addTask(client, venture, {
+      title: 'Rahmenvertrag',
+      schedule: {
+        anchor: 'date',
+        start: '2026-01-01',
+        durationMin: 5,
+        durationMax: 5,
+        durationUnit: 'years',
+      },
+    });
+
+    const st = computeSchedule(client, 'max').byId.get(task.id)!;
+    // Der 1.1.2026 ist ein Donnerstag, der Start bleibt also stehen.
+    expect(st.start).toBe('2026-01-01');
+    expect(st.end).toBe('2030-12-31');
+    // In Arbeitstagen umgerechnet waeren es rund 1260 - genau die Zahl, die
+    // hier NICHT verwendet werden darf.
+    expect(st.unit).toBe('years');
+  });
+});
+
+describe('Kritischer Pfad', () => {
+  it('markiert die längste Kette und lässt der kurzen ihren Puffer', () => {
+    const { client, venture } = buildClient();
+    const start = addTask(client, venture, {
+      title: 'Start',
+      schedule: { anchor: 'date', start: MON, durationMin: 5, durationMax: 5, durationUnit: 'days' },
+    });
+    const lang = addTask(client, venture, {
+      title: 'Lang',
+      dependsOn: [start.id],
+      schedule: { anchor: 'dependency', durationMin: 20, durationMax: 20, durationUnit: 'days' },
+    });
+    const kurz = addTask(client, venture, {
+      title: 'Kurz',
+      dependsOn: [start.id],
+      schedule: { anchor: 'dependency', durationMin: 2, durationMax: 2, durationUnit: 'days' },
+    });
+    const ende = addTask(client, venture, {
+      title: 'Ende',
+      dependsOn: [lang.id, kurz.id],
+      schedule: { anchor: 'dependency', durationMin: 3, durationMax: 3, durationUnit: 'days' },
+    });
+
+    const schedule = computeSchedule(client, 'max');
+    expect(schedule.byId.get(start.id)!.critical).toBe(true);
+    expect(schedule.byId.get(lang.id)!.critical).toBe(true);
+    expect(schedule.byId.get(ende.id)!.critical).toBe(true);
+    // Die kurze Kette hat echten Puffer und liegt deshalb nicht auf dem Pfad.
+    expect(schedule.byId.get(kurz.id)!.critical).toBe(false);
+    expect(schedule.byId.get(kurz.id)!.slack).toBeGreaterThan(0);
+  });
+});
+
+describe('Wiederkehrende Kosten', () => {
+  function budgetWith(task: Task, client: Client, cost: Partial<Task['costs'][number]>) {
+    const budget = createBudget('B');
+    client.budgets = [budget];
+    task.costs = [
+      {
+        id: 'c1',
+        budgetId: budget.id,
+        label: 'Miete',
+        amount: 100,
+        actualAmount: 0,
+        note: '',
+        recurring: true,
+        interval: 'quarter',
+        every: 1,
+        ...cost,
+      },
+    ];
+    return budget;
+  }
+
+  it('bucht zum Rasterbeginn und nur innerhalb der Laufzeit', () => {
+    const { client, venture } = buildClient();
+    // Genau ein Halbjahr, sauber auf Quartalsgrenzen.
+    const task = addTask(client, venture, {
+      title: 'Betrieb',
+      schedule: {
+        anchor: 'date',
+        start: '2026-01-01',
+        end: '2026-06-30',
+        durationMin: 1,
+        durationMax: 1,
+        durationUnit: 'days',
+      },
+    });
+    const budget = budgetWith(task, client, {});
+
+    const schedule = computeSchedule(client, 'max');
+    const daily = budgetDailyLoad(client, schedule, EMPTY_FILTER).get(budget.id)!;
+    const days = [...daily.keys()].sort();
+
+    // Zwei Raten, jeweils am ersten Tag des Quartals - und keine im dritten.
+    expect(days).toEqual(['2026-01-01', '2026-04-01']);
+  });
+
+  it('verschiebt die erste Rate auf den nächsten Rasterbeginn', () => {
+    const { client, venture } = buildClient();
+    const task = addTask(client, venture, {
+      title: 'Betrieb',
+      schedule: {
+        anchor: 'date',
+        start: '2026-02-10',
+        end: '2026-09-30',
+        durationMin: 1,
+        durationMax: 1,
+        durationUnit: 'days',
+      },
+    });
+    const budget = budgetWith(task, client, {});
+
+    const schedule = computeSchedule(client, 'max');
+    const daily = budgetDailyLoad(client, schedule, EMPTY_FILTER).get(budget.id)!;
+    expect([...daily.keys()].sort()).toEqual(['2026-04-01', '2026-07-01']);
+
+    // ... und meldet, dass die Aufgabe quer zum Abrechnungsraster liegt.
+    const warnings = taskWarnings(client, schedule).get(task.id) ?? [];
+    expect(warnings.some((w) => w.text.includes('Raten'))).toBe(true);
+  });
+});
+
+describe('Budget-Obergrenzen', () => {
+  it('setzt die Obergrenze aus Basiswert und Zeiträumen zusammen', () => {
+    const budget = createBudget('B');
+    budget.totalLimit = 0;
+    budget.limits = [
+      { id: 'l1', from: '2026-01-01', to: '2026-12-31', value: 100 },
+      { id: 'l2', from: '2027-01-01', to: '2027-12-31', value: 150 },
+    ];
+
+    // Beide Jahre im Blick: die Summe zählt.
+    expect(budgetCeiling(budget, '2026-01-01', '2027-12-31')).toBe(250);
+    // Nur das erste Jahr: nur dessen Grenze.
+    expect(budgetCeiling(budget, '2026-01-01', '2026-12-31')).toBe(100);
+
+    // Kommt ein Gesamtdeckel dazu, gilt der engere von beiden.
+    budget.totalLimit = 200;
+    expect(budgetCeiling(budget, '2026-01-01', '2027-12-31')).toBe(200);
+    budget.totalLimit = 400;
+    expect(budgetCeiling(budget, '2026-01-01', '2027-12-31')).toBe(250);
+  });
+
+  it('zieht die Zeitachse bis zu den gepflegten Grenzwerten', () => {
+    const { client, venture } = buildClient();
+    addTask(client, venture, {
+      title: 'Kurz',
+      schedule: { anchor: 'date', start: MON, durationMin: 5, durationMax: 5, durationUnit: 'days' },
+    });
+
+    const ohne = computeSchedule(client, 'max');
+    const budget = createBudget('B');
+    budget.limits = [{ id: 'l1', from: '2029-01-01', to: '2029-12-31', value: 1000 }];
+    client.budgets = [budget];
+    const mit = computeSchedule(client, 'max');
+
+    // Ohne Grenzwert endet die Anzeige mit der Aufgabe, mit Grenzwert reicht
+    // sie bis in das Jahr, fuer das etwas hinterlegt ist.
+    expect(ohne.displayEnd < '2029-01-01').toBe(true);
+    expect(mit.displayEnd).toBe('2029-12-31');
+    expect(mit.horizonEnd >= '2029-12-31').toBe(true);
+    // Der Anfang folgt weiter der Viertel-Regel und nicht dem 1. Januar der
+    // Jahresgrenze - er liegt also nicht auf einem Jahresanfang.
+    expect(mit.displayStart.slice(5)).not.toBe('01-01');
+  });
+
+  it('legt den heutigen Tag ins linke Viertel', () => {
+    const { client, venture } = buildClient();
+    // Erst in der Zukunft, damit kein alter Termin den Anfang bestimmt.
+    addTask(client, venture, {
+      title: 'Laeuft',
+      schedule: {
+        anchor: 'date',
+        start: addDays(today(), 30),
+        durationMin: 60,
+        durationMax: 60,
+        durationUnit: 'days',
+      },
+    });
+
+    const { displayStart, displayEnd } = computeSchedule(client, 'max');
+    const span = diffDays(displayStart, displayEnd);
+    const past = diffDays(displayStart, today());
+    // Ein Viertel Rueckblick, drei Viertel Ausblick - Toleranz fuer die
+    // Rundung auf ganze Tage.
+    expect(Math.abs(past / span - 0.25)).toBeLessThan(0.02);
   });
 });

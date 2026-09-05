@@ -19,7 +19,7 @@ import {
   type Task,
   type Venture,
 } from './types';
-import { addDays, nextWorkday, today } from '../engine/dates';
+import { addDays, nextWorkday, today, yearOf } from '../engine/dates';
 // Version wird an genau einer Stelle gepflegt: `version` in package.json.
 import { APP_VERSION } from '../version';
 
@@ -70,6 +70,7 @@ export function createTask(ventureId: Id, title = 'Neue Aufgabe', start?: IsoDat
       start: nextWorkday(start ?? today()),
       durationMin: 5,
       durationMax: 5,
+      durationUnit: 'days',
     },
     dependsOn: [],
     parallelWith: [],
@@ -194,27 +195,79 @@ export function createDatabase(clients?: Client[]): Database {
 export function createDemoClient(): Client {
   const client = createClient('Beispiel GmbH');
   const start = nextWorkday(today());
+  const year = yearOf(today());
+  const jahr = (offset: number) => year + offset;
+  /** Erster bzw. letzter Tag eines Kalenderjahres. */
+  const jahresBeginn = (offset: number) => `${jahr(offset)}-01-01`;
+  const jahresEnde = (offset: number) => `${jahr(offset)}-12-31`;
 
   const vPlanung = createVenture('Plattform-Aufbau');
   const vBetrieb = createVenture('Betrieb');
   client.ventures = [vPlanung, vBetrieb];
 
+  // --- Personen mit Verfügbarkeiten je Jahr ------------------------------
   const anna = createPerson('Anna Berger');
   anna.role = 'Projektleitung';
   anna.defaultFte = 1;
-  const bo = createPerson('Bo Lindqvist');
-  bo.role = 'Entwicklung';
-  bo.defaultFte = 0.8;
-  bo.availability = [createPeriodValue(0.8, undefined, `${new Date().getFullYear()}-12-31`), createPeriodValue(0.5, `${new Date().getFullYear() + 1}-01-01`)];
-  client.people = [anna, bo];
+  anna.availability = [
+    createPeriodValue(1, jahresBeginn(0), jahresEnde(0)),
+    createPeriodValue(0.6, jahresBeginn(1), jahresEnde(1)),
+  ];
 
+  const tobias = createPerson('Tobias Krämer');
+  tobias.role = 'Entwicklung';
+  tobias.defaultFte = 0.8;
+  tobias.availability = [
+    createPeriodValue(0.8, jahresBeginn(0), jahresEnde(0)),
+    createPeriodValue(0.5, jahresBeginn(1), jahresEnde(1)),
+  ];
+
+  const mira = createPerson('Mira Falk');
+  mira.role = 'Beschaffung und Betrieb';
+  mira.defaultFte = 0.6;
+  mira.availability = [
+    createPeriodValue(0.6, jahresBeginn(0), jahresEnde(0)),
+    createPeriodValue(0.8, jahresBeginn(1), jahresEnde(1)),
+  ];
+  client.people = [anna, tobias, mira];
+
+  // --- Budgets: Jahresscheiben plus Gesamtdeckel -------------------------
   const invest = createBudget('Investitionsbudget');
   invest.kind = 'investment';
-  invest.limits = [createPeriodValue(250_000, `${new Date().getFullYear()}-01-01`, `${new Date().getFullYear()}-12-31`)];
+  /*
+   * Die Jahresscheiben decken die Planung: Hardware, Netzwerk, Lizenzen und
+   * der zweite Standort fallen zum jeweiligen Aufgabenstart an und summieren
+   * sich auf 292.000 im laufenden Jahr. Genehmigt ist also mehr als geplant -
+   * alles andere waere im Beispiel eine Schieflage ohne Aussage.
+   */
+  invest.limits = [
+    createPeriodValue(300_000, jahresBeginn(0), jahresEnde(0)),
+    createPeriodValue(100_000, jahresBeginn(1), jahresEnde(1)),
+  ];
   invest.totalLimit = 400_000;
+
+  /*
+   * Betriebskosten: 12 x 3.500 Hosting plus 18.000 Wartung ergeben 60.000 im
+   * Jahr - die Jahresscheiben sind bewusst genau darauf gelegt, damit Planung
+   * und Genehmigung im selben Zeitraum zusammenpassen.
+   */
   const betriebBudget = createBudget('Betriebskosten');
   betriebBudget.kind = 'order';
-  client.budgets = [invest, betriebBudget];
+  betriebBudget.totalLimit = 700_000;
+  betriebBudget.limits = [
+    createPeriodValue(6_000, jahresBeginn(0), jahresEnde(0)),
+    createPeriodValue(60_000, jahresBeginn(1), jahresEnde(1)),
+    createPeriodValue(66_000, jahresBeginn(2), jahresEnde(2)),
+  ];
+
+  const beratung = createBudget('Externe Beratung');
+  beratung.kind = 'order';
+  beratung.limits = [
+    createPeriodValue(40_000, jahresBeginn(0), jahresEnde(0)),
+    createPeriodValue(20_000, jahresBeginn(1), jahresEnde(1)),
+  ];
+  beratung.totalLimit = 60_000;
+  client.budgets = [invest, betriebBudget, beratung];
 
   const tagInfra = createTag('Infrastruktur', client.tags);
   client.tags.push(tagInfra);
@@ -224,8 +277,11 @@ export function createDemoClient(): Client {
   client.tags.push(tagExtern);
 
   const freigabe = createCondition('Freigabe durch Lenkungskreis');
-  client.conditions = [freigabe];
+  const datenschutz = createCondition('Datenschutzprüfung abgeschlossen');
+  datenschutz.met = true;
+  client.conditions = [freigabe, datenschutz];
 
+  // --- Aufgaben ----------------------------------------------------------
   const konzept = createTask(vPlanung.id, 'Grobkonzept erstellen', start);
   konzept.description = 'Zielbild, Architekturskizze und Grobplanung.';
   konzept.schedule.durationMin = 8;
@@ -237,63 +293,99 @@ export function createDemoClient(): Client {
     { ...createChecklistItem('Anforderungen gesammelt'), done: true },
     createChecklistItem('Architekturskizze abgestimmt'),
   ];
+  // Angefangene Beratung: ein Teil des Geplanten ist bereits abgeflossen.
+  konzept.costs = [{ ...createCost(beratung.id), label: 'Architekturberatung', amount: 24_000, actualAmount: 9_000 }];
 
   const beschaffung = createTask(vPlanung.id, 'Hardware beschaffen');
-  beschaffung.schedule = { anchor: 'dependency', durationMin: 15, durationMax: 25 };
+  beschaffung.schedule = { anchor: 'dependency', durationMin: 15, durationMax: 25, durationUnit: 'days' };
   beschaffung.dependsOn = [konzept.id];
   beschaffung.tagIds = [tagInfra.id, tagExtern.id];
   beschaffung.conditionIds = [freigabe.id];
-  beschaffung.costs = [{ ...createCost(invest.id), label: 'Serverhardware', amount: 120_000 }];
+  beschaffung.assignments = [{ ...createAssignment(mira.id), mode: 'PT', value: 8 }];
+  beschaffung.costs = [
+    { ...createCost(invest.id), label: 'Serverhardware', amount: 120_000, actualAmount: 118_400 },
+    { ...createCost(invest.id), label: 'Netzwerktechnik', amount: 35_000 },
+  ];
 
   const aufbau = createTask(vPlanung.id, 'Plattform aufbauen');
-  aufbau.schedule = { anchor: 'dependency', durationMin: 20, durationMax: 30 };
+  aufbau.schedule = { anchor: 'dependency', durationMin: 20, durationMax: 30, durationUnit: 'days' };
   aufbau.dependsOn = [beschaffung.id];
   aufbau.tagIds = [tagInfra.id];
   aufbau.assignments = [
-    { ...createAssignment(bo.id), mode: 'FTE', value: 0.8 },
+    { ...createAssignment(tobias.id), mode: 'FTE', value: 0.8 },
     { ...createAssignment(anna.id), mode: 'PT', value: 10 },
   ];
+  aufbau.costs = [{ ...createCost(invest.id), label: 'Lizenzen', amount: 42_000 }];
 
   const migration = createTask(vPlanung.id, 'Daten migrieren');
-  migration.schedule = { anchor: 'dependency', durationMin: 5, durationMax: 10 };
+  migration.schedule = { anchor: 'dependency', durationMin: 5, durationMax: 10, durationUnit: 'days' };
   migration.dependsOn = [aufbau.id];
   migration.tagIds = [tagSoftware.id];
-  migration.assignments = [{ ...createAssignment(bo.id), mode: 'PT', value: 12 }];
+  migration.conditionIds = [datenschutz.id];
+  migration.assignments = [{ ...createAssignment(tobias.id), mode: 'PT', value: 12 }];
 
+  /*
+   * Dauerläufer mit wiederkehrenden Kosten. Der Start liegt bewusst auf dem
+   * 1. Januar: monatliche und jährliche Abrufe fallen am ersten Tag ihres
+   * Rasters an, und nur wenn die Aufgabe selbst dort beginnt, liegen die Raten
+   * sauber in den Auswertungszeiträumen (siehe validate.ts).
+   */
   const betrieb = createTask(vBetrieb.id, 'Betrieb Infrastruktur');
-  betrieb.description = 'Dauerläufer - hat schlicht kein Enddatum.';
-  betrieb.schedule = { anchor: 'dependency', durationMin: 0, durationMax: 0 };
+  betrieb.description = 'Dauerläufer - beginnt mit dem neuen Geschäftsjahr und hat kein Enddatum.';
+  betrieb.schedule = {
+    anchor: 'date',
+    start: jahresBeginn(1),
+    durationMin: 0,
+    durationMax: 0,
+    durationUnit: 'days',
+  };
   betrieb.dependsOn = [aufbau.id];
   betrieb.tagIds = [tagInfra.id];
   betrieb.ventureConditions = [vPlanung.id];
-  betrieb.assignments = [{ ...createAssignment(bo.id), mode: 'FTE', value: 0.2 }];
+  betrieb.assignments = [
+    { ...createAssignment(tobias.id), mode: 'FTE', value: 0.2 },
+    { ...createAssignment(mira.id), mode: 'FTE', value: 0.3 },
+  ];
   betrieb.costs = [
     { ...createCost(betriebBudget.id), label: 'Hosting', amount: 3_500, recurring: true, interval: 'month', every: 1 },
     { ...createCost(betriebBudget.id), label: 'Wartungsvertrag', amount: 18_000, recurring: true, interval: 'year', every: 1 },
   ];
 
-  // Parallelität: während der Migration muss der Betrieb laufen.
-  migration.parallelWith = [betrieb.id];
-
   const schulung = createTask(vPlanung.id, 'Schulung durchführen');
-  schulung.schedule = { anchor: 'dependency', durationMin: 3, durationMax: 5 };
+  schulung.schedule = { anchor: 'dependency', durationMin: 3, durationMax: 5, durationUnit: 'days' };
   schulung.dependsOn = [migration.id];
   schulung.tagIds = [tagExtern.id];
-  schulung.costs = [{ ...createCost(invest.id), label: 'Externer Trainer', amount: 8_000 }];
+  schulung.assignments = [{ ...createAssignment(anna.id), mode: 'PT', value: 4 }];
+  schulung.costs = [{ ...createCost(beratung.id), label: 'Externer Trainer', amount: 8_000 }];
 
   const doku = createTask(vPlanung.id, 'Dokumentation');
-  doku.schedule = { anchor: 'date', start: addDays(start, 30), durationMin: 4, durationMax: 6 };
+  doku.schedule = { anchor: 'date', start: addDays(start, 30), durationMin: 4, durationMax: 6, durationUnit: 'days' };
   doku.tagIds = [tagSoftware.id];
   doku.assignments = [{ ...createAssignment(anna.id), mode: 'PT', value: 5 }];
 
   // Meilenstein: kurze Aufgabe, die im Netzplan hervorgehoben wird und im
   // Gantt eine senkrechte Linie erzeugt.
   const abnahme = createTask(vPlanung.id, 'Abnahme und Inbetriebnahme');
-  abnahme.schedule = { anchor: 'dependency', durationMin: 1, durationMax: 1 };
+  abnahme.schedule = { anchor: 'dependency', durationMin: 1, durationMax: 1, durationUnit: 'days' };
   abnahme.dependsOn = [migration.id];
   abnahme.milestone = true;
   abnahme.tagIds = [tagSoftware.id];
 
-  client.tasks = [konzept, beschaffung, aufbau, migration, abnahme, betrieb, schulung, doku];
+  // Zweites Jahr: eine Erweiterung, damit die Jahresscheiben der Budgets und
+  // die geringere Verfügbarkeit im Folgejahr sichtbar werden.
+  const ausbau = createTask(vPlanung.id, 'Zweiter Standort');
+  // Haengt in der Kette statt an einem festen Datum: sonst endet der kritische
+  // Pfad bei der Abnahme und alle Vorgaenger bekommen einen riesigen Puffer,
+  // der den ganzen Balkenplan grau zuzieht.
+  ausbau.schedule = { anchor: 'dependency', durationMin: 2, durationMax: 3, durationUnit: 'quarters' };
+  ausbau.dependsOn = [abnahme.id];
+  ausbau.tagIds = [tagInfra.id];
+  ausbau.assignments = [{ ...createAssignment(mira.id), mode: 'FTE', value: 0.4 }];
+  ausbau.costs = [{ ...createCost(invest.id), label: 'Hardware Standort B', amount: 95_000 }];
+
+  // Parallelität: während der Migration muss der Betrieb laufen.
+  migration.parallelWith = [betrieb.id];
+
+  client.tasks = [konzept, beschaffung, aufbau, migration, abnahme, betrieb, schulung, doku, ausbau];
   return client;
 }

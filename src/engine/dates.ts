@@ -6,9 +6,27 @@
  * spielen. Dauern zählen ausschließlich Arbeitstage (Mo-Fr); Feiertage werden
  * bewusst nicht berücksichtigt.
  */
-import type { IsoDate } from '../model/types';
+import type { DurationUnit, IsoDate } from '../model/types';
 
 export const MS_PER_DAY = 86_400_000;
+
+/**
+ * Grenzen, innerhalb derer Datumsangaben verarbeitet werden.
+ *
+ * Ein Datum ausserhalb entsteht praktisch nur durch eine unfertige Eingabe -
+ * beim Tippen von "2027" steht kurzzeitig das Jahr 2 im Feld. Ohne diese
+ * Grenze rechnete die Engine anschliessend über zwei Jahrtausende und die
+ * Oberfläche bliebe stehen.
+ */
+export const MIN_YEAR = 1970;
+export const MAX_YEAR = 2999;
+
+/** Liegt das Datum in einem Bereich, mit dem sinnvoll gerechnet werden kann? */
+export function isPlausibleIso(value: unknown): value is IsoDate {
+  if (!isValidIso(value)) return false;
+  const year = Number(value.slice(0, 4));
+  return year >= MIN_YEAR && year <= MAX_YEAR;
+}
 
 export function toDate(iso: IsoDate): Date {
   const [y, m, d] = iso.split('-').map(Number);
@@ -199,6 +217,28 @@ export function isoWeekNumber(iso: IsoDate): number {
   return 1 + Math.round((target.getTime() - firstThursday.getTime()) / (7 * MS_PER_DAY));
 }
 
+/**
+ * Kalenderjahr einer ISO-Woche. Am Jahreswechsel weicht es vom Kalenderjahr
+ * des Datums ab: der 1. Januar kann noch zur letzten Woche des Vorjahres
+ * gehören. Massgeblich ist der Donnerstag der Woche.
+ */
+export function isoWeekYear(iso: IsoDate): number {
+  const thursday = addDays(startOfWeek(iso), 3);
+  return yearOf(thursday);
+}
+
+/** Montag der `week`-ten Kalenderwoche des ISO-Jahres `year`. */
+export function isoWeekStart(year: number, week: number): IsoDate {
+  // Die Woche mit dem 4. Januar ist immer die erste des Jahres.
+  const first = startOfWeek(`${year}-01-04`);
+  return addDays(first, (Math.max(1, week) - 1) * 7);
+}
+
+/** 52 oder 53 - der 28. Dezember liegt immer in der letzten Woche des Jahres. */
+export function weeksInIsoYear(year: number): number {
+  return isoWeekNumber(`${year}-12-28`);
+}
+
 const MONTH_SHORT = ['Jan', 'Feb', 'Mrz', 'Apr', 'Mai', 'Jun', 'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez'];
 
 /** Zerlegt [from, to] in Buckets der gewünschten Granularität. */
@@ -274,47 +314,85 @@ export function formatDateDe(iso: IsoDate | undefined): string {
   return `${iso.slice(8, 10)}.${iso.slice(5, 7)}.${iso.slice(0, 4)}`;
 }
 
+/** Zeitstempel kurz und deutsch: "04.09.2026, 14:30". */
+export function formatDateTimeDe(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '-';
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${pad(date.getDate())}.${pad(date.getMonth() + 1)}.${date.getFullYear()}, ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
 export function yearOf(iso: IsoDate): number {
   return Number(iso.slice(0, 4));
 }
 
 // ---------------------------------------------------------------------------
-// Dauer-Einheiten
+// Dauern
 // ---------------------------------------------------------------------------
 
 /**
- * Eingabeeinheit für Dauern. Gespeichert wird immer in Arbeitstagen - die
- * Einheit ist reine Eingabehilfe und rechnet mit festen Faktoren um
- * (1 Woche = 5 AT, 1 Monat = 21 AT, 1 Jahr = 252 AT).
+ * Ende eines Zeitraums, der am `start` beginnt und `amount` Einheiten dauert.
+ * Der Starttag zählt mit.
+ *
+ * Arbeitstage zählen Mo-Fr. **Alle anderen Einheiten sind Kalenderzeit** und
+ * werden bewusst nicht in Arbeitstage umgerechnet: eine Aufgabe über fünf
+ * Jahre, die am 01.01. beginnt, endet am 31.12. des fünften Jahres. Rechnete
+ * man sie in 252 Arbeitstage je Jahr um, endete sie fast anderthalb Jahre zu
+ * früh - und niemand meint das, wenn er "fünf Jahre" sagt.
  */
-export type DurationUnit = 'days' | 'weeks' | 'months' | 'years';
-
-export const WORKDAYS_PER: Record<DurationUnit, number> = {
-  days: 1,
-  weeks: 5,
-  months: 21,
-  years: 252,
-};
-
-export const DURATION_UNIT_LABEL: Record<DurationUnit, string> = {
-  days: 'AT',
-  weeks: 'Wochen',
-  months: 'Monate',
-  years: 'Jahre',
-};
-
-/** Arbeitstage -> Anzeigewert in der gewählten Einheit. */
-export function workdaysToUnit(workdays: number, unit: DurationUnit): number {
-  const value = workdays / WORKDAYS_PER[unit];
-  return Math.round(value * 100) / 100;
+export function addDuration(start: IsoDate, amount: number, unit: DurationUnit): IsoDate {
+  const n = Math.max(1, Math.round(amount));
+  if (unit === 'days') return addWorkdays(start, n);
+  const d = toDate(start);
+  const after = (() => {
+    switch (unit) {
+      case 'weeks':
+        return new Date(d.getTime() + n * 7 * MS_PER_DAY);
+      case 'months':
+        return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + n, d.getUTCDate()));
+      case 'quarters':
+        return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 3 * n, d.getUTCDate()));
+      case 'years':
+        return new Date(Date.UTC(d.getUTCFullYear() + n, d.getUTCMonth(), d.getUTCDate()));
+    }
+  })();
+  // Der Tag vor dem gleichen Kalendertag der Folgeperiode - so ist der Zeitraum
+  // an beiden Enden geschlossen (01.01. + 1 Jahr => 31.12.).
+  return addDays(toIso(after), -1);
 }
 
-/** Anzeigewert -> Arbeitstage (mindestens 1). */
-export function unitToWorkdays(value: number, unit: DurationUnit): number {
-  return Math.max(1, Math.round(value * WORKDAYS_PER[unit]));
+/** Umkehrung von `addDuration`: Beginn eines Zeitraums, der am `end` endet. */
+export function subDuration(end: IsoDate, amount: number, unit: DurationUnit): IsoDate {
+  const n = Math.max(1, Math.round(amount));
+  if (unit === 'days') return shiftWorkdaysBack(end, n);
+  const d = toDate(addDays(end, 1));
+  const before = (() => {
+    switch (unit) {
+      case 'weeks':
+        return new Date(d.getTime() - n * 7 * MS_PER_DAY);
+      case 'months':
+        return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - n, d.getUTCDate()));
+      case 'quarters':
+        return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - 3 * n, d.getUTCDate()));
+      case 'years':
+        return new Date(Date.UTC(d.getUTCFullYear() - n, d.getUTCMonth(), d.getUTCDate()));
+    }
+  })();
+  return toIso(before);
 }
 
-/** Sinnvolle Obergrenze des Sliders je Einheit. */
+/** Startdatum, sodass [start, end] genau `duration` Arbeitstage umfasst. */
+export function shiftWorkdaysBack(end: IsoDate, duration: number): IsoDate {
+  let cur = end;
+  let remaining = Math.max(1, Math.round(duration)) - 1;
+  while (remaining > 0) {
+    cur = addDays(cur, -1);
+    if (isWorkday(cur)) remaining--;
+  }
+  return cur;
+}
+
+/** Sinnvolle Obergrenze des Reglers je Einheit. */
 export function sliderMaxFor(unit: DurationUnit): number {
   switch (unit) {
     case 'days':
@@ -323,12 +401,46 @@ export function sliderMaxFor(unit: DurationUnit): number {
       return 52;
     case 'months':
       return 36;
+    case 'quarters':
+      return 20;
     case 'years':
       return 10;
   }
 }
 
-/** Schrittweite des Sliders je Einheit. */
-export function sliderStepFor(unit: DurationUnit): number {
-  return unit === 'days' ? 1 : 0.5;
+/**
+ * Grenzen eines Kalenderrasters um einen Tag herum. Wird für das Einrasten im
+ * Gantt und für die Prüfung wiederkehrender Kosten gebraucht.
+ */
+export function periodStartOf(iso: IsoDate, granularity: Granularity): IsoDate {
+  switch (granularity) {
+    case 'day':
+      return iso;
+    case 'week':
+      return startOfWeek(iso);
+    case 'month':
+      return startOfMonth(iso);
+    case 'quarter':
+      return startOfQuarter(iso);
+    case 'year':
+      return startOfYear(iso);
+  }
+}
+
+/** Letzter Tag des Rasters, in dem `iso` liegt. */
+export function periodEndOf(iso: IsoDate, granularity: Granularity): IsoDate {
+  switch (granularity) {
+    case 'day':
+      return iso;
+    case 'week':
+      return addDays(startOfWeek(iso), 6);
+    case 'month':
+      return endOfMonth(iso);
+    case 'quarter': {
+      const q = toDate(startOfQuarter(iso));
+      return toIso(new Date(Date.UTC(q.getUTCFullYear(), q.getUTCMonth() + 3, 0)));
+    }
+    case 'year':
+      return `${iso.slice(0, 4)}-12-31`;
+  }
 }

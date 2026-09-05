@@ -27,6 +27,7 @@ import {
   type PeriodValue,
   type Person,
   type Tag,
+  type DurationUnit,
   type Task,
   type TaskStatus,
   type Venture,
@@ -119,6 +120,35 @@ const MIGRATIONS: Record<number, (db: AnyRecord) => AnyRecord> = {
       })),
     })),
   }),
+
+  /**
+   * 4 -> 5: Dauern bekommen eine Einheit.
+   *
+   * Bis hierher waren alle Dauern Arbeitstage, die Einheit war reine
+   * Eingabehilfe. Jetzt entscheidet sie, wie das Ende gerechnet wird
+   * (Kalenderzeit ab `weeks`), deshalb muss sie mitgespeichert werden.
+   * Bestandsdaten bleiben unverändert: sie waren Arbeitstage und heissen
+   * ab jetzt ausdrücklich so.
+   */
+  4: (db) => ({
+    ...db,
+    schemaVersion: 5,
+    clients: arr(db.clients).map((client) => ({
+      ...client,
+      tasks: arr(client?.tasks).map((task) => ({
+        ...task,
+        schedule: { ...(task?.schedule ?? {}), durationUnit: 'days' },
+      })),
+    })),
+  }),
+
+  /**
+   * 5 -> 6: Checklistenpunkte halten fest, wann sie abgehakt wurden.
+   *
+   * Für bereits erledigte Punkte bleibt das Feld leer: der Zeitpunkt ist nicht
+   * bekannt, und "heute" einzutragen wäre eine erfundene Tatsache.
+   */
+  5: (db) => ({ ...db, schemaVersion: 6 }),
 };
 
 export interface MigrationResult {
@@ -167,6 +197,7 @@ export function migrate(raw: unknown): MigrationResult {
 // ---------------------------------------------------------------------------
 
 const STATUSES: TaskStatus[] = ['open', 'active', 'operations', 'done'];
+const DURATION_UNITS: DurationUnit[] = ['days', 'weeks', 'months', 'quarters', 'years'];
 const BUDGET_KINDS: BudgetKind[] = ['neutral', 'order', 'investment'];
 
 export function normalizeDatabase(raw: AnyRecord, notes: string[] = []): Database {
@@ -306,6 +337,7 @@ function normalizeClient(raw: AnyRecord, notes: string[]): Client {
         id: str(c?.id) || newId('chk'),
         text: str(c?.text),
         done: bool(c?.done),
+        doneAt: typeof c?.doneAt === 'string' ? c.doneAt : undefined,
       })),
       status: STATUSES.includes(t?.status) ? t.status : 'open',
       milestone: bool(t?.milestone),
@@ -316,6 +348,7 @@ function normalizeClient(raw: AnyRecord, notes: string[]): Client {
         end: dateOrUndef(t?.schedule?.end),
         durationMin,
         durationMax,
+        durationUnit: DURATION_UNITS.includes(t?.schedule?.durationUnit) ? t.schedule.durationUnit : 'days',
       },
       dependsOn,
       parallelWith: arr(t?.parallelWith).map(String).filter((d) => taskIds.has(d) && d !== str(t?.id)),

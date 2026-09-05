@@ -13,7 +13,7 @@
  *    getrennt.
  */
 import type { Client, Database, Task } from '../model/types';
-import { COST_INTERVAL_LABEL, isOpenEnded, TASK_STATUS_LABEL } from '../model/types';
+import { COST_INTERVAL_LABEL, DURATION_UNIT_LABEL, isOpenEnded, TASK_STATUS_LABEL } from '../model/types';
 import { formatDateDe } from '../engine/dates';
 import { computeSchedule, type Scenario } from '../engine/schedule';
 import { isVentureDone } from '../engine/validate';
@@ -72,8 +72,9 @@ function clientToCsv(client: Client, scenario: Scenario): string {
       'Start',
       'Ende',
       'Dauer (AT)',
-      'Dauer min (AT)',
-      'Dauer max (AT)',
+      'Dauer min',
+      'Dauer max',
+      'Dauereinheit',
       'Puffer (AT)',
       'Kritischer Pfad',
       'Startanker',
@@ -98,6 +99,7 @@ function clientToCsv(client: Client, scenario: Scenario): string {
         open ? '' : st?.duration,
         open ? '' : task.schedule.durationMin,
         open ? '' : task.schedule.durationMax,
+        open ? '' : DURATION_UNIT_LABEL[task.schedule.durationUnit],
         open ? '' : st?.slack,
         st?.critical && !open,
         task.schedule.anchor === 'date' ? 'festes Datum' : 'Vorgänger',

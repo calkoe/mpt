@@ -40,9 +40,12 @@ das Ergebnis zurück.
    innerhalb **desselben Mandanten** zeigen.
 5. Keine Zyklen in \`dependsOn\`.
 6. Datumsangaben immer als \`YYYY-MM-DD\`. Es gibt keine Uhrzeiten.
-7. Dauern (\`durationMin\`, \`durationMax\`) sind **Arbeitstage** (Mo-Fr), ganze
-   Zahlen >= 0, und \`durationMax >= durationMin\`. Eine Dauer von \`0\` bedeutet
-   "kein Enddatum" - die Aufgabe ist ein Dauerläufer.
+7. Dauern (\`durationMin\`, \`durationMax\`) sind ganze Zahlen >= 0 in der Einheit
+   \`durationUnit\`, und \`durationMax >= durationMin\`. Eine Dauer von \`0\`
+   bedeutet "kein Enddatum" - die Aufgabe ist ein Dauerläufer.
+8. \`durationUnit\` ist \`days\` | \`weeks\` | \`months\` | \`quarters\` | \`years\`.
+   **Nur \`days\` zählt Arbeitstage (Mo-Fr); alles andere ist Kalenderzeit.**
+   Eine Aufgabe über 5 \`years\` ab dem 01.01. endet am 31.12. des fünften Jahres.
 
 ## Datenmodell (Kurzfassung)
 
@@ -60,7 +63,9 @@ das Ergebnis zurück.
     - \`schedule\`:
       - \`anchor: "date"\` -> fester Start in \`start\`.
       - \`anchor: "dependency"\` -> Start = spätestes Ende der \`dependsOn\` + 1 Arbeitstag.
-      - \`durationMin\`/\`durationMax\` - Dauerspanne in Arbeitstagen.
+      - \`durationMin\`/\`durationMax\` - Dauerspanne in \`durationUnit\`.
+      - \`durationUnit\` - \`days\` (Arbeitstage) oder Kalenderzeit
+        (\`weeks\`/\`months\`/\`quarters\`/\`years\`).
       - \`end\` - optionales festes Ende (nur bei \`anchor: "date"\`).
       - Dauerläufer haben schlicht kein Enddatum: \`durationMin\` und
         \`durationMax\` sind \`0\` und \`end\` fehlt (z.B. "Betrieb Infrastruktur X").

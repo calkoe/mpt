@@ -157,6 +157,21 @@ h1, h2, h3, h4 {
 
 .topbar__brand span { font-size: var(--fs-xs); color: var(--text-faint); font-weight: 500; }
 
+/*
+ * Datenschutzhinweis in der Kopfzeile. Verschwindet auf schmalen Fenstern als
+ * Erstes - dort zaehlt der Platz fuer die Bedienung.
+ */
+.topbar__privacy {
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+  white-space: nowrap;
+  padding-right: var(--sp-1);
+}
+
+@media (max-width: 1400px) {
+  .topbar__privacy { display: none; }
+}
+
 .topbar__divider {
   width: 1px;
   height: 16px;
@@ -181,7 +196,12 @@ h1, h2, h3, h4 {
 .savestate__dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-faint); flex: none; }
 .savestate--clean .savestate__dot,
 .savestate--saved .savestate__dot { background: var(--ok); }
-.savestate--dirty .savestate__dot { background: var(--warn); }
+/*
+ * Warten auf das Zurueckschreiben ist ein normaler Zwischenschritt, kein
+ * Problem - deshalb Blau wie beim Schreiben selbst und nicht Orange. Orange
+ * bleibt fuer Zustaende reserviert, in denen wirklich nichts gespeichert wird.
+ */
+.savestate--dirty .savestate__dot { background: var(--accent); animation: pulse 1.6s ease-in-out infinite; }
 .savestate--saving .savestate__dot { background: var(--accent); animation: pulse 1s ease-in-out infinite; }
 .savestate--error { border-color: var(--critical); background: var(--critical-soft); color: var(--critical); }
 .savestate--error .savestate__dot { background: var(--critical); }
@@ -190,9 +210,8 @@ h1, h2, h3, h4 {
 .savestate--readonly .savestate__dot { background: var(--warn); }
 
 /*
- * Warnzaehler in der Kopfzeile. Orange, nicht rot: die Meldungen sind
- * Hinweise auf den Planungsstand, kein Fehlerzustand - Rot ist hier fuer
- * gescheiterte Schreibvorgaenge reserviert.
+ * Einstieg ins Warnzentrum. Immer neutral: die Kopfzeile soll nicht dauerhaft
+ * blinken, die Bewertung der Befunde steht im Warnzentrum selbst.
  */
 .warncount {
   display: inline-flex;
@@ -211,20 +230,6 @@ h1, h2, h3, h4 {
 }
 
 .warncount:hover { border-color: var(--border-strong); color: var(--text); }
-
-.warncount--warn {
-  border-color: var(--warn);
-  background: var(--warn-soft);
-  color: var(--warn);
-  font-weight: 600;
-}
-
-.warncount--critical {
-  border-color: var(--critical);
-  background: var(--critical-soft);
-  color: var(--critical);
-  font-weight: 600;
-}
 
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
 
@@ -295,6 +300,39 @@ h1, h2, h3, h4 {
 
 .venture__title { font-weight: 600; display: flex; align-items: center; gap: var(--sp-2); }
 .venture__meta { font-size: var(--fs-sm); color: var(--text-muted); margin-top: 2px; display: flex; gap: var(--sp-3); }
+/*
+ * Fester Platz am rechten Rand einer Vorhabenzeile. Immer gleich breit, auch
+ * wenn nichts darin steht: sonst rutschte das Warnsymbol zur Seite, sobald der
+ * Ausklapp-Pfeil erscheint, und die Symbole staenden nicht untereinander.
+ */
+.venture__slot {
+  flex: none;
+  width: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/*
+ * Ausklapp-Pfeil am gewaehlten Vorhaben. Dezent, bis man darauf zeigt - er
+ * soll die Liste nicht mit Bedienelementen zustellen.
+ */
+.venture__toggle {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+  border-radius: var(--r-sm);
+  line-height: 1;
+  transition: var(--transition);
+}
+.venture__toggle:hover { color: var(--text); background: var(--surface-3); }
+.venture__toggle--open { transform: rotate(180deg); color: var(--text); }
+
 .venture__bar { height: 3px; border-radius: var(--r-full); background: var(--surface-3); margin-top: var(--sp-2); overflow: hidden; }
 .venture__bar > i { display: block; height: 100%; background: var(--ok); }
 
@@ -531,16 +569,23 @@ h1, h2, h3, h4 {
   border-radius: var(--r-md);
 }
 
+/*
+ * 22px Innenhoehe + 2x2px Innenabstand + 2x1px Rahmen = 28px aussen. Damit ist
+ * ein Umschalter exakt so hoch wie ein Knopf und ein Eingabefeld - genau
+ * darauf beruht, dass in einer Zeile nichts um ein, zwei Pixel versetzt steht.
+ */
 .segmented__item {
   border: none;
   background: transparent;
   color: var(--text-muted);
   padding: 0 var(--sp-3);
-  height: 24px;
+  height: 22px;
   border-radius: var(--r-sm);
   cursor: pointer;
   font-size: var(--fs-sm);
   font-weight: 500;
+  /* Beschriftungen sind Etiketten - sie brechen nie um. */
+  white-space: nowrap;
   display: inline-flex;
   align-items: center;
   gap: var(--sp-1);
@@ -564,6 +609,8 @@ h1, h2, h3, h4 {
   display: inline-flex;
   align-items: center;
   gap: var(--sp-2);
+  /* Gleiche Hoehe wie Knopf, Feld und Umschalter - siehe .segmented__item. */
+  min-height: 28px;
   cursor: pointer;
   user-select: none;
   font-size: var(--fs-md);
@@ -849,27 +896,37 @@ h1, h2, h3, h4 {
 .viz--zoom.viz--panning { cursor: grabbing; }
 .viz--zoom .node { cursor: pointer; }
 
-.viz__controls {
-  position: absolute;
-  top: var(--sp-2);
-  right: var(--sp-2);
-  z-index: 5;
-  display: flex;
-  align-items: center;
+/*
+ * Bedienelemente eines Diagramms sitzen in der Werkzeugleiste des Panels, nicht
+ * auf der Zeichenflaeche: als schwebende Kachel liefen sie im Gantt beim
+ * Scrollen mit dem Inhalt davon. Der Platzhalter setzt sie durch eine feine
+ * Linie von den uebrigen Schaltern ab - siehe components/ChartToolbar.tsx.
+ */
+.chart-toolbar {
+  flex: none;
   gap: var(--sp-1);
-  padding: 3px;
-  border-radius: var(--r-md);
-  background: var(--surface);
-  border: 1px solid var(--border);
-  box-shadow: var(--shadow-sm);
+  padding-left: var(--sp-2);
+  border-left: 1px solid var(--border);
 }
+
+/* Ohne Inhalt (Tabellenansicht) darf der Platzhalter keinen Strich hinterlassen. */
+.chart-toolbar:empty { display: none; }
 
 .viz__zoomlevel {
   font-size: var(--fs-xs);
   color: var(--text-muted);
-  min-width: 38px;
+  /* Reicht bis 999 % und haelt die Breite stabil, damit beim Zoomen nichts
+     neben der Zahl hin und her springt. */
+  min-width: 34px;
   text-align: center;
 }
+
+/*
+ * In der Werkzeugleiste zaehlt jeder Pixel - die Zoomknoepfe stehen deshalb
+ * dichter beieinander als sonst.
+ */
+.chart-toolbar .btn--icon { width: 20px; }
+.chart-toolbar .btn { padding: 0 6px; }
 
 .node {
   cursor: pointer;
@@ -903,6 +960,19 @@ h1, h2, h3, h4 {
 .node--dim { opacity: 0.35; }
 .node__title { fill: var(--text); font-size: 12px; font-weight: 600; pointer-events: none; }
 .node__meta { fill: var(--text-muted); font-size: 10px; pointer-events: none; }
+
+/*
+ * Fortschritt aus der Checkliste. Bewusst in der Akzentfarbe und in Ziffern
+ * mit fester Breite: die Zahl aendert sich beim Abhaken, und ein springender
+ * Text im Knoten waere unruhig.
+ */
+.node__progress {
+  fill: var(--accent);
+  font-size: 10px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
 .node__tags { pointer-events: none; }
 .node__tag-label { font-weight: 600; letter-spacing: 0.01em; }
 /* Der Streifen wird geclippt, braucht also keine eigenen Rundungen mehr. */
@@ -959,6 +1029,43 @@ h1, h2, h3, h4 {
 
 /* Ankersymbole an den Balkenenden: fest gesetzt vs. abgeleitet. */
 .gantt__anchor { fill: none; stroke: var(--text-muted); stroke-width: 1.4; pointer-events: none; }
+/*
+ * Ziehgriff der Beschriftungsspalte. Unsichtbar, aber greifbar - die sichtbare
+ * Kante ist die Rasterlinie daneben.
+ */
+/*
+ * Zwei Ebenen im Gantt: der Inhalt scrollt, die zweite bleibt stehen.
+ *
+ * `position: sticky` statt eines selbst gesetzten Transforms - das erledigt der
+ * Compositor des Browsers. Eine JS-Loesung muesste bei jedem Scrollereignis ein
+ * Attribut schreiben; die Ebene liefe dem Scrollen dann um einen Frame
+ * hinterher und flackert sichtbar.
+ *
+ * Der negative obere Aussenabstand legt die Ebene wieder ueber den Inhalt -
+ * `absolute` waere hier keine Alternative, weil `sticky` ein Element im
+ * normalen Fluss verlangt.
+ */
+.gantt { position: relative; }
+.gantt__chart { display: block; }
+
+.gantt__frozen {
+  display: block;
+  position: sticky;
+  left: 0;
+  /* Faengt sonst alle Klicks ab, die den Balken darunter gelten. */
+  pointer-events: none;
+}
+
+.gantt__frozen .gantt__row,
+.gantt__frozen .rail-block,
+.gantt__frozen .gantt__resize { pointer-events: auto; }
+
+/* Untergrund der mitgefuehrten Ebene - sonst scheinen die Balken durch. */
+.gantt__frozen-bg { fill: var(--surface); }
+
+.gantt__resize { fill: transparent; cursor: col-resize; }
+.gantt__resize:hover { fill: var(--accent); fill-opacity: 0.18; }
+
 .gantt__anchor--fixed { fill: var(--text); stroke: var(--surface); stroke-width: 1; }
 
 .gantt__milestone line { stroke: var(--info); stroke-width: 1.4; stroke-dasharray: 6 3; opacity: 0.8; }
@@ -1002,7 +1109,14 @@ h1, h2, h3, h4 {
 /* Zweite Achse rechts - gehoert zur kumulierten Linie, nicht zu den Saeulen. */
 .chart__axis--cumulative { stroke: var(--text-muted); opacity: 0.5; }
 .chart__tick--cumulative { fill: var(--text-muted); }
-.chart__stack--breach { stroke: var(--critical); stroke-width: 1.6; pointer-events: auto; }
+/*
+ * Klammer um einen Saeulenstapel. Die Farbe folgt dem Auslastungszustand:
+ * ueberschritten rot, knapp orange, **genau ausgeschoepft blau** - Letzteres
+ * ist keine Warnung, sondern der Idealfall und soll trotzdem auffallen.
+ */
+.chart__stack--over { stroke: var(--critical); stroke-width: 1.6; pointer-events: auto; }
+.chart__stack--warn { stroke: var(--warn); stroke-width: 1.4; pointer-events: auto; }
+.chart__stack--exact { stroke: var(--info); stroke-width: 1.4; pointer-events: auto; }
 
 /*
  * Diagramm fuellt die verfuegbare Hoehe, die Legende bleibt darunter stehen.
@@ -1015,7 +1129,21 @@ h1, h2, h3, h4 {
  * auf die verfuegbare Hoehe, ein vertikaler Balken waere reines Rundungs-
  * artefakt und wuerde nur Platz kosten.
  */
-.reschart__plot { flex: 1 1 auto; min-height: 0; overflow-x: auto; overflow-y: hidden; }
+.reschart__plot { flex: 1 1 auto; min-height: 0; overflow-x: auto; overflow-y: hidden; position: relative; }
+
+/*
+ * Mitgefuehrte Achsen: bleiben am linken und rechten Rand des sichtbaren
+ * Bereichs stehen, waehrend die Saeulen darunter scrollen. `position: sticky`
+ * statt eines selbst gesetzten Transforms - siehe .gantt__frozen.
+ */
+.reschart__axes {
+  display: block;
+  position: sticky;
+  left: 0;
+  pointer-events: none;
+}
+
+.reschart__axis-bg { fill: var(--surface); }
 
 /*
  * Feste Hoehe, nicht `min-height`: beim Ueberfahren wechselt der Inhalt von
@@ -1052,30 +1180,85 @@ h1, h2, h3, h4 {
  * Zeilenhoehe vom Inhalt abhaengig und der Inhalt von der Zeilenhoehe - das
  * schaukelt sich bis in fuenfstellige Pixelhoehen auf.
  */
+/*
+ * Abschnitte der Ganglinien: Gesamtsichten, Personen, Budgets - getrennt durch
+ * eine feine Linie. Die Kachelhoehe ist **fest**, nicht `1fr`: die Diagramme
+ * messen ihre Flaeche und zeichnen sich passend hoch. Haenge die Zeilenhoehe
+ * am Inhalt, haengt der Inhalt an der Zeilenhoehe - das schaukelt sich bis in
+ * fuenfstellige Pixelhoehen auf.
+ */
+.resource-sections {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-2);
+  height: 100%;
+  overflow-y: auto;
+}
+
+.section-rule {
+  border-top: 1px solid var(--border);
+  margin: 0 0 var(--sp-2);
+}
+
 .resource-grid {
   display: grid;
   /*
    * So viele Kacheln je Reihe wie passen, und die Reihe wird immer voll:
    * `auto-fill` legt die Spaltenzahl aus der Mindestbreite fest, `1fr` verteilt
-   * den Rest gleichmaessig. Zwei feste Spalten verschenkten auf breiten
-   * Fenstern die halbe Flaeche.
+   * den Rest gleichmaessig. Breit genug, dass Name, Kennzahlen und Knopf in die
+   * Kachelkopfzeile passen.
    */
-  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
-  grid-auto-rows: minmax(240px, 1fr);
+  grid-template-columns: repeat(auto-fill, minmax(460px, 1fr));
+  grid-auto-rows: 250px;
   gap: var(--sp-2);
-  padding: var(--sp-2);
-  align-content: stretch;
-  height: 100%;
 }
+
+/* Die beiden Gesamtsichten stehen immer nebeneinander. */
+.resource-grid--totals { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 
 .resource-grid > .panel { min-height: 0; overflow: hidden; }
 
-/* Eine gewaehlte Ressource nimmt die volle Breite ein. */
-.resource-grid--single { grid-template-columns: minmax(0, 1fr); }
+/*
+ * Die ganze Kachel oeffnet die Detailansicht - ein eigener Knopf dafuer war
+ * ueberfluessig, weil man ohnehin ins Diagramm klickt. Die Balken darin
+ * behalten ihre eigene Wirkung (Sprung zur Aufgabe); der Klick auf sie
+ * blubbert nach oben, deshalb liegt hier nur der Rahmen.
+ */
+.panel--clickable { cursor: pointer; }
+.panel--clickable:hover { border-color: var(--border-strong); }
+.panel--clickable:focus-visible { box-shadow: var(--focus-ring); }
+
+/*
+ * In einer Kachel wird die Kopfzeile gekuerzt statt gescrollt: waagerechtes
+ * Scrollen in einer 460px-Kachel findet niemand, und der Name ist ohnehin das
+ * Einzige, was dort unbedingt lesbar sein muss.
+ */
+.resource-grid .panel__head { overflow: hidden; }
+.resource-grid .panel__title { min-width: 0; }
+
+/* Eine gewaehlte Ressource nimmt die volle Breite und die volle Hoehe ein. */
+/*
+ * Eine gewaehlte Ressource fuellt die Flaeche. `flex` statt `height: 100%`:
+ * das Raster ist direktes Kind des Flex-Containers und bekommt daraus eine
+ * **definite** Hoehe. Mit `height: 100%` in einem Zwischenelement ohne eigene
+ * Hoehe entstuende dagegen eine Rueckkopplung - das Diagramm misst die Kachel,
+ * die Kachel richtet sich nach dem Diagramm, und die Flaeche waechst endlos.
+ */
+.resource-grid--single {
+  grid-template-columns: minmax(0, 1fr);
+  grid-auto-rows: minmax(0, 1fr);
+  flex: 1 1 auto;
+  min-height: 240px;
+}
+
+/* Ein Abschnitt waechst mit seinem Inhalt; die Kachelhoehe ist fest. */
+.resource-sections__group { flex: none; }
 
 /* Erst auf sehr schmalen Fenstern einspaltig - sonst bleiben es immer zwei. */
 @media (max-width: 900px) {
-  .resource-grid { grid-template-columns: minmax(0, 1fr); }
+  .resource-grid,
+  .resource-grid--totals { grid-template-columns: minmax(0, 1fr); }
 }
 
 /*
@@ -1119,6 +1302,23 @@ h1, h2, h3, h4 {
 
 .list__item--sortable:active .list__grip { cursor: grabbing; }
 
+/*
+ * Eine Person im Auslastungsdialog: Kopfzeile mit Kennzahlen, Balken, darunter
+ * ihre Aufgaben. Abgesetzt wie ein Listeneintrag, damit die Personen im Dialog
+ * klar voneinander getrennt sind.
+ */
+.workload {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--editor-section);
+}
+
+.workload__head { display: flex; align-items: center; gap: var(--sp-3); }
+
 /* Gesamtsummen unter einer Liste */
 .totals {
   margin-top: var(--sp-2);
@@ -1131,6 +1331,63 @@ h1, h2, h3, h4 {
 }
 
 .totals__row { display: flex; justify-content: space-between; gap: var(--sp-3); }
+.totals__block { display: flex; flex-direction: column; gap: 3px; }
+
+/*
+ * Vier Spalten: Bezeichnung, genehmigt, geplant, ausgegeben. Die drei
+ * Zahlenspalten haben eine Mindestbreite - sonst schrumpfen sie bei kleinen
+ * Betraegen zusammen und "0 € 0 € 0 €" steht als eine Kette da.
+ */
+.totals__grid,
+.totals__head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) repeat(3, minmax(78px, auto));
+  gap: var(--sp-2);
+  align-items: baseline;
+}
+.totals__grid--two { grid-template-columns: minmax(0, 1fr) repeat(2, minmax(78px, auto)); }
+.totals__grid > span:not(:first-child),
+.totals__head > span:not(:first-child),
+.totals__head > .measure { text-align: right; justify-content: flex-end; }
+.totals__head { color: var(--text-faint); font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: 0.05em; }
+
+/*
+ * Auslastungsbalken. Zwei Fuellungen im selben Gleis: blass die Planung,
+ * kraeftig das ausgegebene Geld - dieselbe Aussage wie die ineinander
+ * liegenden Saeulen im Kostendiagramm, nur auf eine Zeile eingedampft.
+ * Die Farbe kommt vom Auslastungszustand, damit "genau ausgelastet" auch hier
+ * blau und nicht rot ist.
+ */
+.ubar { display: flex; align-items: center; gap: var(--sp-2); }
+.ubar__track {
+  position: relative;
+  flex: 1 1 auto;
+  height: 6px;
+  min-width: 40px;
+  border-radius: var(--r-full);
+  background: var(--surface-3);
+  overflow: hidden;
+}
+.ubar__planned,
+.ubar__actual {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  border-radius: var(--r-full);
+  transition: width var(--transition);
+}
+.ubar__planned { background: var(--accent); opacity: 0.28; }
+.ubar__actual { background: var(--accent); }
+.ubar__label { flex: none; font-size: var(--fs-xs); color: var(--text-faint); }
+
+.ubar--warn .ubar__actual { background: var(--warn); }
+.ubar--warn .ubar__label { color: var(--warn); }
+.ubar--over .ubar__actual { background: var(--critical); }
+.ubar--over .ubar__label { color: var(--critical); font-weight: 650; }
+/* Punktgenau ausgeschoepft - der Idealfall, deshalb ausdruecklich nicht rot. */
+.ubar--exact .ubar__actual { background: var(--info); }
+.ubar--exact .ubar__label { color: var(--info); font-weight: 650; }
 .totals__row--sum { font-weight: 650; border-top: 1px solid var(--border); margin-top: 2px; padding-top: 3px; }
 
 /* Abweichender Bedarf je Zeitraum, eingerueckt unter der Zuordnung. */
@@ -1176,9 +1433,16 @@ h1, h2, h3, h4 {
 .tagfilter__reset { border-top: 1px solid var(--border); margin-top: 3px; color: var(--text-faint); }
 
 /* Zeitraumauswahl in Quartalen/Jahren */
-.period { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
+/*
+ * Der Zeitraumwaehler nimmt die volle Zeilenbreite ein: feste Breiten fuer die
+ * beiden Auswahllisten, der Umschalter dazwischen dehnt sich. Sonst endete die
+ * Zeile je nach gewaehlter Stufe an einer anderen Stelle.
+ */
+.period { display: flex; align-items: center; gap: var(--sp-2); width: 100%; }
 .period__year { width: 84px; flex: none; }
-.period .segmented__item { padding: 0 var(--sp-2); }
+.period__month { width: 84px; flex: none; }
+.period .segmented { flex: 1 1 auto; min-width: 0; }
+.period .segmented__item { flex: 1 1 auto; padding: 0 var(--sp-2); justify-content: center; }
 
 .legend { display: flex; flex-wrap: wrap; gap: var(--sp-3); font-size: var(--fs-sm); color: var(--text-muted); }
 .legend__item { display: inline-flex; align-items: center; gap: var(--sp-1); }
@@ -1274,11 +1538,12 @@ h1, h2, h3, h4 {
 
 .editor__titlerow .segmented {
   flex: none;
+  width: var(--sidecol-w);
   height: var(--titlerow-h);
   align-items: center;
 }
 
-.editor__titlerow .segmented__item { height: calc(var(--titlerow-h) - 8px); }
+.editor__titlerow .segmented__item { height: calc(var(--titlerow-h) - 8px); padding: 0 var(--sp-2); }
 
 .editor__grid {
   display: grid;
@@ -1293,7 +1558,7 @@ h1, h2, h3, h4 {
   display: flex;
   flex-direction: column;
   gap: var(--sp-3);
-  background: var(--surface-2);
+  background: var(--editor-section);
 }
 
 .editor__section-title {
@@ -1319,6 +1584,61 @@ h1, h2, h3, h4 {
   align-items: start;
 }
 
+/*
+ * Aufgaben-Editor: Terminierung und Ressourcen, je zur Haelfte. Die
+ * Verknuepfungen sind aus dieser Reihe herausgeloest und stehen oben neben der
+ * Beschreibung - siehe .editor__brief.
+ */
+@media (min-width: 1100px) {
+  .editor__cols--task {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/*
+ * Beschreibung links, Verknuepfungen rechts. Die rechte Spalte ist genauso
+ * breit wie die Statusauswahl in der Titelzeile (--sidecol-w) - nur so laeuft
+ * die rechte Kante des Editors durch, statt an jeder Zeile woanders zu enden.
+ */
+.editor__brief {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--sidecol-w);
+  gap: var(--sp-3);
+  align-items: stretch;
+}
+
+.editor__brief .textarea { height: 100%; }
+
+/*
+ * Verknuepfungen auf kleinem Raum: ein Umschalter fuer die Art, eine
+ * Auswahlliste, darunter alle bestehenden Verknuepfungen als Marken. Die
+ * Markenflaeche nimmt den Rest der Hoehe und scrollt, damit der Block genau so
+ * hoch bleibt wie die Beschreibung daneben.
+ */
+.linkpanel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.linkpanel__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+  align-content: flex-start;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.linkpanel__chips .chip { max-width: 100%; }
+
+@media (max-width: 1099px) {
+  .editor__brief { grid-template-columns: minmax(0, 1fr); }
+}
+
 .line-item {
   display: grid;
   grid-template-columns: 1fr auto;
@@ -1327,23 +1647,89 @@ h1, h2, h3, h4 {
   padding: var(--sp-2);
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
-  background: var(--surface);
+  background: var(--editor-item);
 }
 
 .line-item__controls { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center; }
 
 /* Beschriftetes Feld in einer Kostenposition. */
-.costfield { display: flex; align-items: center; gap: var(--sp-2); }
+/*
+ * Beschriftung links, Eingabe rechts - in einem gemeinsamen Raster. Vorher war
+ * jede Zeile ein eigener Flex-Container mit eigener Beschriftungsbreite; die
+ * Felder standen dadurch treppenartig versetzt und endeten unterschiedlich
+ * weit rechts. Ein Raster fuer alle Zeilen loest beides auf einmal.
+ */
+.fieldgrid {
+  display: grid;
+  /* Breit genug fuer "ausgegeben" samt Zeichen - sonst wird es abgeschnitten. */
+  grid-template-columns: 100px minmax(0, 1fr);
+  gap: var(--sp-2);
+  align-items: center;
+}
 
-.costfield__label {
+.fieldgrid__label {
   font-size: var(--fs-xs);
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--text-faint);
-  min-width: 62px;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
 }
 
-.costfield--slider { max-width: 260px; }
+/*
+ * Betragsfeld: die Einheit liegt im Feld, damit alle Felder einer Spalte an
+ * derselben Kante enden.
+ */
+.amount { position: relative; min-width: 0; }
+.amount .input--amount { padding-right: 22px; }
+
+.amount__suffix {
+  position: absolute;
+  right: var(--sp-2);
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+  font-size: var(--fs-sm);
+}
+
+/* Zeichen und Beschriftung der drei Geldgroessen - siehe components/CostMeasure.tsx. */
+.measure {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.measure__mark { flex: none; color: var(--text-faint); }
+.measure--actual .measure__mark { color: var(--text-muted); }
+
+/*
+ * Vorschau der automatisch erzeugten Abrufe. Bewusst klein und blass: sie ist
+ * eine Kontrolle ("bucht das wirklich zum Quartalsbeginn?"), kein Inhalt, den
+ * man liest.
+ */
+.duelist { display: flex; flex-direction: column; gap: 3px; }
+
+.duelist__title {
+  font-size: var(--fs-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-faint);
+}
+
+.duelist__items { display: flex; flex-wrap: wrap; gap: 3px; }
+
+.duelist__item {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  background: var(--surface-3);
+  border-radius: var(--r-sm);
+  padding: 0 5px;
+  line-height: 17px;
+}
+
+.duelist__item--more { letter-spacing: 1px; }
 
 /* Notiz an einer Zuordnung - bewusst unauffaellig. */
 .input--note {
@@ -1364,6 +1750,64 @@ h1, h2, h3, h4 {
 }
 
 .checklist__item { display: flex; align-items: center; gap: var(--sp-2); }
+
+/*
+ * Runder, gruener Haken statt des Systemkaestchens: er ist groesser, damit man
+ * ihn im Vorbeigehen trifft, und die Farbe sagt schon aus der Entfernung, wie
+ * weit die Liste ist. Das echte Eingabefeld bleibt darunter liegen - sonst
+ * ginge die Tastaturbedienung verloren.
+ */
+.checklist__box {
+  position: relative;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  cursor: pointer;
+}
+
+.checklist__box input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  margin: 0;
+  cursor: pointer;
+}
+
+.checklist__box svg {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1.5px solid var(--border-strong);
+  background: var(--surface);
+  transition: var(--transition);
+}
+
+.checklist__box svg path {
+  fill: none;
+  stroke: var(--surface);
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  /* Erst beim Abhaken sichtbar - vorher ist das Kaestchen einfach leer. */
+  opacity: 0;
+}
+
+.checklist__box input:checked + svg {
+  background: var(--ok);
+  border-color: var(--ok);
+}
+
+.checklist__box input:checked + svg path { opacity: 1; }
+.checklist__box input:focus-visible + svg { box-shadow: var(--focus-ring); }
+.checklist__box:hover svg { border-color: var(--ok); }
+
+/* Zeitpunkt des Abhakens - Beiwerk, deshalb klein und blass. */
+.checklist__stamp {
+  flex: none;
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
 .checklist__item .combo,
 .checklist__item .checklist__text { flex: 1 1 auto; min-width: 0; }
 .checklist__item .checklist__text { border: none; background: transparent; padding: 2px 4px; min-height: 24px; }

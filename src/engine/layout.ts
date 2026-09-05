@@ -39,7 +39,12 @@ export interface NetworkLayout {
 
 /** Etwas breiter als noetig waere - so bleibt mehr vom Titel lesbar. */
 export const NODE_WIDTH = 216;
-export const NODE_HEIGHT = 68;
+/**
+ * Hoehe eines Knotens. Ergibt sich aus dem senkrechten Rhythmus in
+ * `NetworkChart` (Titel, zwei Metazeilen, Tag-Marken) mit gleichem Rand oben
+ * und unten - siehe die Konstanten dort.
+ */
+export const NODE_HEIGHT = 80;
 const COLUMN_GAP = 78;
 const ROW_GAP = 26;
 const PADDING = 24;

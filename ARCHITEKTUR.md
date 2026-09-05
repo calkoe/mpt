@@ -57,16 +57,21 @@ Deshalb ist die gesamte Fachlogik ohne DOM testbar – und genau dort liegen die
 
 | Datei          | Inhalt                                                                                                                                                                                 |
 | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `dates.ts`     | Arbeitstags-Mathematik (Mo–Fr), Bucket-Bildung für alle Zeitraster, deutsche Formatierung. Rechnet intern in UTC, um Sommerzeit zu umgehen.                                            |
+| `dates.ts`     | Arbeitstags-Mathematik (Mo–Fr), **Kalenderdauern** (`addDuration`/`subDuration`), Rastergrenzen (`periodStartOf`/`periodEndOf`), Bucket-Bildung, deutsche Formatierung. Rechnet intern in UTC, um Sommerzeit zu umgehen. |
 | `schedule.ts`  | `computeSchedule()`: topologische Sortierung → Vorwärtsrechnung → Rückwärtsrechnung → kritischer Pfad. Außerdem `wouldCreateCycle()` und `collectNeighbourhood()` (Tiefengrad-Filter). |
-| `resources.ts` | Tageslasten je Person/Budget, Aggregation in Buckets, Grenzwerte, Jahressummen.                                                                                                        |
-| `validate.ts`  | Alle Warnungen (Parallelität, Bedingungen, Status gegen Termin, Auslastung ab 90 %, Zyklen).                                                                                           |
+| `resources.ts` | Tageslasten je Person/Budget, Aggregation in Buckets, Grenzwerte (`budgetCeiling`), Jahressummen, Gesamtsichten (`totalBudgetOf`/`totalPersonOf`).                                     |
+| `validate.ts`  | Alle Warnungen (Parallelität, Bedingungen, Status gegen Termin, Auslastung, Abrechnungsraster, Zyklen) und `utilisationState()`.                                                       |
 | `layout.ts`    | Netzplan-Layout (Ebenen nach Tiefe, Baryzentrum gegen Kantenkreuzungen) und Kurvenpfade.                                                                                               |
 
 **Terminierungsregeln in Kurzform:**
 
 - `anchor: 'date'` → Start ist gesetzt. `anchor: 'dependency'` → Start = spätestes Vorgängerende + 1 Arbeitstag.
-- Dauer ist eine Spanne (`durationMin`/`durationMax`); das Szenario (`'min'`/`'max'`) wählt den Rechenwert.
+- Dauer ist eine Spanne (`durationMin`/`durationMax`) **in der Einheit `durationUnit`**; das Szenario
+  (`'min'`/`'max'`) wählt den Rechenwert.
+- **Nur `days` zählt Arbeitstage. Wochen, Monate, Quartale und Jahre sind Kalenderzeit** – eine
+  Aufgabe über fünf Jahre ab dem 01.01. endet am 31.12. des fünften Jahres. Gerechnet wird
+  ausschließlich über `addDuration()`/`subDuration()` in `dates.ts`; eine Umrechnung in Arbeitstage
+  (252 je Jahr) verschöbe das Ende um Monate und ist deshalb nirgends erlaubt.
 - **Status `operations` ("Betrieb") zählt wie `done`.** Nie direkt auf `=== 'done'` prüfen, immer
   `isSettled(status)` aus `model/types.ts` verwenden - sonst gilt eine Aufgabe im Betrieb je nach
   Codestelle mal als erledigt und mal nicht.
@@ -86,7 +91,14 @@ Prüfungen an die Fälligkeit gebunden:
   `CONDITION_LEAD_DAYS` liegt (`info`) – vorher gar nicht.
 - Der Status wird gegen den Terminplan geprüft: Start erreicht, aber noch „Offen" → Warnung; Ende
   vorbei, aber nicht „Abgeschlossen" → Warnung.
-- Personen und Budgets warnen ab `UTILISATION_WARN_RATIO` (90 %), nicht erst bei Überschreitung.
+- Personen und Budgets warnen ab `UTILISATION_WARN_RATIO` (90 %), nicht erst bei Überschreitung –
+  aber **nie bei punktgenauer Ausschöpfung**: `utilisationState()` kennt dafür den eigenen Zustand
+  `exact`, der blau dargestellt statt gemeldet wird. Ein Budget, das exakt aufgeht, ist der Idealfall.
+- **Budgetwarnungen entstehen nur aus abgerufenem Geld, nie aus Planwerten.** Eine Planung über der
+  Grenze ist eine Absicht; genau dafür plant man. Erst was abfließt, reißt ein Budget.
+- Wiederkehrende Kosten werden am ersten Tag ihres Rasters gebucht. Liegt die Aufgabe quer dazu
+  (quartalsweise Kosten, Aufgabenbeginn Mitte Februar), wird das gemeldet – sonst verschöben sich die
+  Raten still gegen die Auswertungszeiträume.
 - `taskWarnings(client, schedule, now)` nimmt den Bezugstag als Parameter – nur so sind die
   terminbezogenen Prüfungen testbar.
 
@@ -145,13 +157,17 @@ werden (`fill: none` an Kanten), sonst füllt das Bild sie schwarz aus.
 | `components/ExportPngButton.tsx`                    | Sitzt an der jeweiligen Grafik, weil nur dort eindeutig ist, welches SVG gemeint ist.                |
 | `components/useChartZoom.ts`                        | Zoomstufe der Zeitdiagramme; passt sich beim Wechsel von Raster oder Zeitraum automatisch ein.       |
 | `components/useReorder.ts`                          | Umsortieren von Listen per Ziehen (HTML5-Drag). Reihenfolge = Array-Reihenfolge, ein normaler Commit.|
-| `components/PeriodPicker.tsx`                       | Zeitraum in Quartalen/Jahren. Speichert weiterhin ISO-Daten - das Modell bleibt unverändert.         |
+| `components/PeriodPicker.tsx`                       | Zeitraum in Jahren, Quartalen und Monaten. Speichert weiterhin ISO-Daten - das Modell bleibt unverändert. |
+| `components/measureText.ts`                         | Textbreiten per Canvas messen (`fitText`). **`context.font` versteht keine CSS-Variablen** - deshalb `fontOf()` benutzen. |
+| `components/CostMeasure.tsx`                        | Zeichen und Beschriftung für genehmigt (▢), geplant (○) und ausgegeben (●). **Jede Stelle, die Geld zeigt, benutzt sie.** |
+| `components/ChartToolbar.tsx`                       | Zoom-/Exportknöpfe in der Werkzeugleiste statt auf der Zeichenfläche; `ZoomControls` für alle drei Diagramme. |
+| `components/AssignmentFields.tsx`                   | Eine Personalzuordnung zum Bearbeiten - genutzt von der Aufgaben- **und** der Personenseite.         |
 | `components/TagFilter.tsx`                          | Tag-Filter als Aufklappmenü, in Aufgaben- und Ressourcenansicht identisch.                           |
 | `components/CostFields.tsx`                         | Eine Kostenposition zum Bearbeiten - genutzt von der Aufgaben- **und** der Budgetseite.              |
 | `Sidebar.tsx` / `TopBar.tsx` / `CommandPalette.tsx` | Rahmen der Anwendung.                                                                                |
 | `tasks/`                                            | Aufgabenübersicht: `NetworkChart`, `GanttChart`, `ResourceRailLayer`, `TaskEditor`.                  |
 | `resources/`                                        | Ressourcenübersicht: `ResourceChart`, `ResourceTable`, `ResourceEditors`.                            |
-| `dialogs/`                                          | Checkpoint-Verlauf, KI-Austausch, Warnzentrum, Tag-Verwaltung, Kurzanleitung.                        |
+| `dialogs/`                                          | Checkpoint-Verlauf, KI-Austausch, Warnzentrum, Tag-Verwaltung, Auslastung ("Wer arbeitet woran?"), Kurzanleitung. |
 | `ErrorBoundary.tsx`                                 | Verhindert den weißen Bildschirm bei unerwarteten Zuständen.                                         |
 
 **SVG-Geometrie gehört ins JSX, nicht ins CSS.** `rx`, `ry`, `x`, `y`, `width`, `height` als
@@ -167,16 +183,43 @@ Menü darin wird abgeschnitten, egal wie hoch der z-index ist. Siehe `components
 setzen (gedrosselt über `requestAnimationFrame`) und erst beim Loslassen committen - siehe
 `useNodeDrag` in `NetworkChart.tsx`.
 
+**Diagramm-Bedienelemente gehören in die Werkzeugleiste, nicht auf die Zeichenfläche.** Als
+schwebende Kachel (`position: absolute`) liefen sie im Gantt beim Scrollen mit dem Inhalt davon; im
+Netzplan fiel das nur nicht auf, weil dort gezoomt statt gescrollt wird. Die Zoomstufe kennt aber
+nur das Diagramm - deshalb rendert es seine Knöpfe weiterhin selbst und `ChartToolbar` schiebt sie
+per Portal in den `ChartToolbarSlot` der Leiste.
+
 **Zeitachse und Zoomstufe sind zwei verschiedene Dinge.** Gezeichnet wird bis `horizonEnd` (zehn
 Jahre, damit Dauerläufer ihre Kosten wirklich prognostizieren); die automatische Zoomstufe richtet
-sich nach `displayStart`..`displayEnd`, also nach dem Ende der letzten endlichen Aufgabe.
+sich nach `displayStart`..`displayEnd`, also nach dem Ende der letzten endlichen Aufgabe. Der
+heutige Tag liegt dabei im **linken Viertel** (`DISPLAY_PAST_SHARE`) - ein Viertel Rückblick, drei
+Viertel Ausblick.
 
-**Eingaben schreiben verzögert - Textfelder wie Regler.** `useDeferredCommit` in
-`components/controls.tsx` hält den Wert lokal und meldet ihn erst nach einer kurzen Pause nach oben;
-Regler zusätzlich sofort beim Loslassen. Grund: jeder Commit klont den gesamten Datenbestand und
-lässt CPM und Ressourcenlast neu rechnen - pro Tastendruck oder Reglerschritt war das die Ursache
-spürbarer Trägheit. **Rohe `<input>` deshalb vermeiden**, sonst fällt eine Stelle wieder aus dem
-Muster.
+**Stehende Spalten und Achsen: `position: sticky`, kein JavaScript.** Im Gantt bleiben
+Beschriftungsspalte und Ressourcenleiste stehen, in den Ganglinien die beiden Achsen. Umgesetzt ist
+das über eine zweite, klebende SVG-Ebene über der scrollenden - der Compositor des Browsers erledigt
+das Mitführen. Ein selbst gesetztes `transform` je Scrollereignis (der erste Versuch) läuft dem
+Scrollen um einen Frame hinterher und flackert sichtbar.
+
+Zwei Punkte, die dabei nicht offensichtlich sind:
+
+- Die klebende Ebene liegt über allem und würde sonst jeden Klick abfangen: `pointer-events: none`
+  am Wurzelelement, `auto` nur an den bedienbaren Teilen.
+- Der PNG-Export muss beide Ebenen zusammensetzen (`overlay` in `export/png.ts`), sonst fehlen im
+  Bild genau die Aufgabentitel.
+
+**Eingaben schreiben verzögert - eine Zahl für alles.** `useDeferredCommit` in
+`components/controls.tsx` hält den Wert lokal und meldet ihn erst nach `COMMIT_DELAY_MS` (1 s) Ruhe
+nach oben; Regler zusätzlich sofort beim Loslassen. Grund: jeder Commit klont den gesamten
+Datenbestand und lässt CPM und Ressourcenlast neu rechnen - pro Tastendruck, Pfeiltaste oder
+Reglerschritt war das die Ursache spürbarer Trägheit. **Rohe `<input>` deshalb vermeiden**, sonst
+fällt eine Stelle wieder aus dem Muster; für Zahlen gibt es `NumberField` (Tausenderpunkte, leeres
+Feld statt einer störenden 0, Pfeil hoch/runter).
+
+**Unfertige Datumseingaben dürfen nicht in die Rechnung.** Beim Tippen von "2027" steht kurzzeitig
+das Jahr 2 im Feld. Ein Plan über zwei Jahrtausende lässt die Oberfläche stehen, deshalb prüft
+`DateInput` mit `isPlausibleIso()` vor dem Commit - und `computeSchedule()` prüft ein zweites Mal,
+damit auch importierte Dateien die Anwendung nicht lahmlegen können.
 
 **Löschen** läuft immer über `ConfirmButton`: der erste Klick versetzt denselben Knopf in einen
 blinkenden Bestätigungszustand, der zweite Klick innerhalb von 3 Sekunden führt die Aktion aus.
@@ -248,7 +291,7 @@ Die Version wird an **genau einer Stelle** gepflegt: `version` in `package.json`
 ```bash
 # 1. Version in package.json anheben, Änderung committen
 # 2. Tag setzen und pushen
-git tag v1.3.0 && git push origin v1.3.0
+git tag v1.4.0 && git push origin v1.4.0
 ```
 
 Der Workflow `.github/workflows/build.yml` veröffentlicht **nur** bei einem Tag
@@ -285,6 +328,12 @@ Ein bestehender Datenbestand darf durch ein Update **nie** unbrauchbar werden:
 Die Sicherungskopie vor der Migration erzeugt `fileStore.readFromHandle()` automatisch.
 
 ## 8. Tests
+
+**Budgetrechnung ist eigens abgesichert** (`engine/budget.test.ts`): Fälligkeiten, Raster,
+Faktoren, Dauerläufer, Bucket-Aggregation über alle Zeitraster, Zeitraumsummen, Obergrenzen aus
+Basiswert und Scheiben, Gesamtbudget und Warnschwellen. Zwei Invarianten stehen dort ausdrücklich:
+die Abruf-Vorschau im Editor zeigt genau die Tage, an denen auch gebucht wird - und "keine
+Obergrenze" ist nicht null, eine Summe aus Grenze und keiner Grenze ist keine Grenze.
 
 ```bash
 npm test          # einmalig

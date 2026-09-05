@@ -19,6 +19,12 @@ export type ThemeSetting = "system" | "light" | "dark";
 export type TaskView = "network" | "gantt";
 export type ResourceView = "chart" | "table";
 export type Weighting = "none" | "duration" | "cost" | "people";
+/**
+ * Welche der drei Geldgrössen die Tabelle zeigt. Sie dürfen nie verwechselt
+ * werden: `approved` ist die Obergrenze, `planned` die Absicht, `actual` das
+ * tatsächlich abgeflossene Geld - nur Letzteres löst Warnungen aus.
+ */
+export type CostMeasure = "approved" | "planned" | "actual";
 
 export interface Preferences {
   theme: ThemeSetting;
@@ -36,6 +42,10 @@ export interface Preferences {
   showResourceRail: boolean;
   /** Anteil der oberen Fläche (Plan) am rechten Bereich, 0..1. */
   splitRatio: number;
+  /** Breite der Beschriftungsspalte im Gantt in Pixeln - frei ziehbar. */
+  ganttLabelWidth: number;
+  /** Kennzahl, die in der Ressourcentabelle gezeigt wird. */
+  costMeasure: CostMeasure;
   /**
    * Die Kurzanleitung wurde bereits gesehen. Wird gesetzt, sobald eine eigene
    * Datei geöffnet oder angelegt wurde - wer mit dem Beispielbestand spielt,
@@ -57,6 +67,8 @@ const DEFAULTS: Preferences = {
   showCriticalPath: false,
   showResourceRail: true,
   splitRatio: 0.55,
+  ganttLabelWidth: 210,
+  costMeasure: "planned",
   guideSeen: false,
 };
 

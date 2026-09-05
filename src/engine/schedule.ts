@@ -13,8 +13,28 @@
  * KEINE Termine (sonst wäre gar keine Planung möglich) - sie erzeugen nur
  * Warnungen, siehe `engine/validate.ts`.
  */
-import { isOpenEnded, type Client, type Id, type IsoDate, type Task } from '../model/types';
-import { addDays, addWorkdays, diffDays, maxDate, nextWorkday, prevWorkday, today, workdaysBetween } from './dates';
+import {
+  DURATION_UNIT_LABEL,
+  isOpenEnded,
+  type Client,
+  type DurationUnit,
+  type Id,
+  type IsoDate,
+  type Task,
+} from '../model/types';
+import {
+  addDays,
+  addDuration,
+  diffDays,
+  isPlausibleIso,
+  maxDate,
+  minDate,
+  nextWorkday,
+  prevWorkday,
+  subDuration,
+  today,
+  workdaysBetween,
+} from './dates';
 
 export type Scenario = 'min' | 'max';
 
@@ -23,8 +43,12 @@ export interface ScheduledTask {
   /** Früheste Lage. */
   start: IsoDate;
   end: IsoDate;
-  /** Dauer in Arbeitstagen im gewählten Szenario. */
+  /** Dauer im gewählten Szenario, gezählt in `unit`. */
   duration: number;
+  /** Einheit der Dauer - Arbeitstage oder Kalenderzeit. */
+  unit: DurationUnit;
+  /** Tatsächliche Arbeitstage zwischen Start und Ende - für Anzeige und Puffer. */
+  workdays: number;
   /** Ende im jeweils anderen Szenario - Basis für den Unschärfebalken. */
   endOptimistic: IsoDate;
   endPessimistic: IsoDate;
@@ -52,11 +76,12 @@ export interface ScheduledTask {
 export const DISPLAY_TAIL_DAYS = 40;
 
 /**
- * Wie weit die Zeitachsen vor den heutigen Tag zurückreichen. Ein Plan, der
- * exakt heute beginnt, wirkt abgeschnitten - und was gerade eben war, gehört
- * zum Bild dazu.
+ * Wo der heutige Tag im Bild sitzt: im linken Viertel. Ein Viertel Rückblick,
+ * drei Viertel Ausblick - man plant nach vorn, aber was gerade eben war,
+ * gehört zur Einordnung dazu. Aus diesem Verhältnis ergibt sich der Vorlauf:
+ * ein Drittel der Strecke von heute bis zum Ende der Anzeige.
  */
-export const DISPLAY_LEAD_DAYS = 21;
+export const DISPLAY_PAST_SHARE = 1 / 3;
 
 export interface ScheduleResult {
   /** Ergebnis je Aufgaben-Id. */
@@ -84,15 +109,27 @@ export interface ScheduleResult {
 }
 
 /**
- * Dauer einer Aufgabe im Szenario, in Arbeitstagen. Dauerläufer haben keine
- * Dauer; für sie liefert die Funktion 1, damit der Balken einen Anfang hat -
- * das Ende setzt `computeSchedule` später auf den Horizont.
+ * Dauer einer Aufgabe im Szenario, gezählt in `task.schedule.durationUnit`.
+ * Dauerläufer haben keine Dauer; für sie liefert die Funktion 1, damit der
+ * Balken einen Anfang hat - das Ende setzt `computeSchedule` später auf den
+ * Horizont.
  */
 export function durationOf(task: Task, scenario: Scenario): number {
   const { durationMin, durationMax } = task.schedule;
   const min = Math.max(1, Math.round(durationMin || 1));
   const max = Math.max(min, Math.round(durationMax || min));
   return scenario === 'min' ? min : max;
+}
+
+/**
+ * Dauer einer terminierten Aufgabe zum Anzeigen. Arbeitstage werden als solche
+ * benannt, Kalenderdauern in ihrer eigenen Einheit - "3 Monate" ist die
+ * Angabe, die jemand gemacht hat; "63 AT" wäre eine Umrechnung, die er nie
+ * gemeint hat.
+ */
+export function formatDuration(st: ScheduledTask): string {
+  if (st.unit === 'days') return `${st.duration} AT`;
+  return `${st.duration} ${DURATION_UNIT_LABEL[st.unit]} · ${st.workdays} AT`;
 }
 
 /** Existiert der Vorgänger noch und liegt er im selben Mandanten? */
@@ -197,29 +234,41 @@ export function computeSchedule(client: Client, scenario: Scenario = 'max'): Sch
       }
       start = latestEnd ? nextWorkday(addDays(latestEnd, 1)) : defaultStart;
     } else {
-      start = nextWorkday(task.schedule.start ?? defaultStart);
+      // Unfertige Eingaben (Jahr "2" beim Tippen von 2027) dürfen die
+      // Berechnung nicht über Jahrtausende laufen lassen - siehe isPlausibleIso.
+      const fixed = isPlausibleIso(task.schedule.start) ? task.schedule.start : undefined;
+      start = nextWorkday(fixed ?? defaultStart);
       // Auch bei festem Start zählt die Tiefe für die Netzplan-Ebenen.
       for (const d of deps) depth = Math.max(depth, (byId.get(d)?.depth ?? 0) + 1);
     }
 
     // Explizites Enddatum gewinnt gegenüber der Dauer (nur bei festem Start).
+    let unit = task.schedule.durationUnit;
     let duration = durationOf(task, scenario);
-    let durationMin = durationOf(task, 'min');
-    let durationMax = durationOf(task, 'max');
-    if (task.schedule.anchor === 'date' && task.schedule.end && diffDays(start, task.schedule.end) >= 0) {
-      duration = workdaysBetween(start, task.schedule.end);
-      durationMin = duration;
-      durationMax = duration;
+    let end = addDuration(start, duration, unit);
+    let endOptimistic = addDuration(start, durationOf(task, 'min'), unit);
+    let endPessimistic = addDuration(start, durationOf(task, 'max'), unit);
+
+    const fixedEnd = isPlausibleIso(task.schedule.end) ? task.schedule.end : undefined;
+    if (task.schedule.anchor === 'date' && fixedEnd && diffDays(start, fixedEnd) >= 0) {
+      // Ein gesetztes Ende ist taggenau; die Dauer ergibt sich daraus in
+      // Arbeitstagen, damit die Rückwärtsrechnung wieder dort landet.
+      unit = 'days';
+      duration = workdaysBetween(start, fixedEnd);
+      end = fixedEnd;
+      endOptimistic = fixedEnd;
+      endPessimistic = fixedEnd;
     }
 
-    const end = addWorkdays(start, duration);
     byId.set(task.id, {
       task,
       start,
       end,
       duration,
-      endOptimistic: addWorkdays(start, durationMin),
-      endPessimistic: addWorkdays(start, durationMax),
+      unit,
+      workdays: workdaysBetween(start, end),
+      endOptimistic,
+      endPessimistic,
       lateStart: start,
       lateEnd: end,
       slack: 0,
@@ -284,18 +333,25 @@ export function computeSchedule(client: Client, scenario: Scenario = 'max'): Sch
       // Endaufgabe: spätestes Ende ist das Projektende.
       st.lateEnd = projectEnd;
     } else {
+      /*
+       * Die späteste Lage wird vom **frühesten** Nachfolger bestimmt: sobald
+       * einer von ihnen anfangen muss, ist Schluss. Vorher stand hier ein
+       * Vergleich, der stattdessen den spätesten Nachfolger nahm - dadurch
+       * bekam jede Aufgabe Puffer und der kritische Pfad verschwand.
+       */
       let earliest: IsoDate | undefined;
       for (const s of successors) {
         // Ein Kalendertag vor dem spätesten Start des Nachfolgers, auf den
         // vorherigen Arbeitstag gezogen - sonst entsteht über Wochenenden ein
         // Scheinpuffer von einem Tag.
         const candidate = prevWorkday(addDays(s.lateStart, -1));
-        earliest = earliest && diffDays(earliest, candidate) > 0 ? candidate : (earliest ?? candidate);
+        earliest = earliest === undefined || diffDays(candidate, earliest) > 0 ? candidate : earliest;
       }
       st.lateEnd = earliest ?? projectEnd;
     }
-    // lateStart aus lateEnd und Dauer zurückrechnen.
-    st.lateStart = shiftWorkdaysBack(st.lateEnd, st.duration);
+    // lateStart aus lateEnd und Dauer zurückrechnen - in derselben Einheit,
+    // in der auch vorwärts gerechnet wurde.
+    st.lateStart = subDuration(st.lateEnd, st.duration, st.unit);
     st.slack = Math.max(0, workdaysBetween(st.start, st.lateStart) - 1);
     st.critical = st.slack === 0;
   }
@@ -304,14 +360,17 @@ export function computeSchedule(client: Client, scenario: Scenario = 'max'): Sch
   for (const id of cycles) {
     const task = tasks.find((t) => t.id === id);
     if (!task) continue;
-    const start = nextWorkday(task.schedule.start ?? horizonStart);
+    const fixed = isPlausibleIso(task.schedule.start) ? task.schedule.start : undefined;
+    const start = nextWorkday(fixed ?? horizonStart);
     const duration = durationOf(task, scenario);
-    const end = addWorkdays(start, duration);
+    const end = addDuration(start, duration, task.schedule.durationUnit);
     byId.set(id, {
       task,
       start,
       end,
       duration,
+      unit: task.schedule.durationUnit,
+      workdays: workdaysBetween(start, end),
       endOptimistic: end,
       endPessimistic: end,
       lateStart: start,
@@ -325,22 +384,57 @@ export function computeSchedule(client: Client, scenario: Scenario = 'max'): Sch
   }
 
   const ordered = order.map((t) => byId.get(t.id)!).filter(Boolean);
-  const displayEnd = hasOpenEnded ? addDays(projectEnd, DISPLAY_TAIL_DAYS) : projectEnd;
-  const leadIn = addDays(today(), -DISPLAY_LEAD_DAYS);
+
+  /*
+   * Auch gepflegte Grenzwerte spannen die Zeitachse auf.
+   *
+   * Wer für 2028 ein Budget hinterlegt, dort aber noch keine Aufgabe geplant
+   * hat, sah bisher gar nichts: die Achsen richteten sich allein nach den
+   * Aufgaben und endeten lange davor. Verfügbarkeiten und Obergrenzen sind
+   * jedoch genauso Planungsdaten und gehören ins Bild.
+   */
+  const defined = definedPeriodRange(client);
+  let displayEnd = hasOpenEnded ? addDays(projectEnd, DISPLAY_TAIL_DAYS) : projectEnd;
+  displayEnd = maxDate(displayEnd, defined.to)!;
+
+  /*
+   * Vorlauf so, dass heute im linken Viertel liegt. Beginnt eine Aufgabe noch
+   * früher, gewinnen die Daten - lieber rutscht der heutige Tag nach rechts,
+   * als dass etwas aus dem Bild fällt.
+   *
+   * Gepflegte Zeiträume ziehen den Anfang bewusst **nicht** zurück: eine
+   * Jahresobergrenze beginnt immer am 1. Januar und schöbe damit jeden Plan
+   * auf den Jahresanfang, egal wie weit das Jahr fortgeschritten ist. Nach
+   * hinten dehnen sie den Zeitraum sehr wohl (siehe `displayEnd`) - dort war
+   * das Problem: ein Budget für 2028 ohne Aufgaben blieb sonst unsichtbar.
+   */
+  const now = today();
+  const ahead = Math.max(1, diffDays(now, displayEnd));
+  const leadIn = addDays(now, -Math.round(ahead * DISPLAY_PAST_SHARE));
   const displayStart = diffDays(leadIn, horizonStart) > 0 ? leadIn : horizonStart;
+  // Gerechnet wird mindestens bis zum Ende der Anzeige, sonst fehlen die
+  // Buckets, in denen nur ein Grenzwert steht.
+  horizonEnd = maxDate(horizonEnd, displayEnd)!;
+
   return { byId, ordered, cycles, horizonStart, horizonEnd, projectEnd, displayEnd, displayStart };
 }
 
-/** Startdatum, sodass [start, end] genau `duration` Arbeitstage umfasst. */
-function shiftWorkdaysBack(end: IsoDate, duration: number): IsoDate {
-  let cur = end;
-  let remaining = Math.max(1, duration) - 1;
-  while (remaining > 0) {
-    cur = addDays(cur, -1);
-    const day = new Date(`${cur}T00:00:00Z`).getUTCDay();
-    if (day !== 0 && day !== 6) remaining--;
+/**
+ * Äusserste Grenzen aller gepflegten Zeiträume (Budget-Obergrenzen und
+ * Verfügbarkeiten). Offene Enden zählen nicht mit - sie gelten ohnehin überall.
+ */
+function definedPeriodRange(client: Client): { from?: IsoDate; to?: IsoDate } {
+  let from: IsoDate | undefined;
+  let to: IsoDate | undefined;
+  const lists = [...client.budgets.map((b) => b.limits), ...client.people.map((p) => p.availability)];
+  for (const list of lists) {
+    for (const entry of list) {
+      if (entry.value <= 0) continue;
+      if (isPlausibleIso(entry.from)) from = minDate(from, entry.from);
+      if (isPlausibleIso(entry.to)) to = maxDate(to, entry.to);
+    }
   }
-  return cur;
+  return { from, to };
 }
 
 /**

@@ -1,36 +1,39 @@
 /**
  * Linke Seitenleiste: Mandantenauswahl, Vorhaben-Blöcke, Moduswechsel.
  *
- * Ein Klick auf ein Vorhaben filtert die gesamte rechte Seite. Das aktive
- * Vorhaben klappt seine Bearbeitung direkt auf - kein separater Dialog, kein
- * Speichern-Klick.
+ * Ein Klick auf ein Vorhaben filtert die gesamte rechte Seite. Umbenennen und
+ * Löschen liegen hinter einem kleinen Pfeil, der nur am gewählten Vorhaben
+ * erscheint - kein separater Dialog, kein Speichern-Klick, aber auch keine
+ * Bedienelemente in einer Liste, durch die man vor allem navigiert.
  */
 import { useState } from 'react';
 import { createClient, createVenture } from '../model/factory';
-import type { Venture } from '../model/types';
-import { useDerived } from '../state/useDerived';
+import type { Id, Venture } from '../model/types';
 import { isVentureDone } from '../engine/validate';
 import { useStore, type ViewMode } from '../state/store';
-import { Button, Combobox, ConfirmButton, Field, Segmented, TextInput, WarnIcon } from './components/controls';
+import { Button, Combobox, ConfirmButton, Field, Segmented, TextInput } from './components/controls';
 import { TagDialog } from './dialogs/TagDialog';
+import { WorkloadDialog } from './dialogs/WorkloadDialog';
 import { moveItem, useReorder } from './components/useReorder';
 
 export function Sidebar() {
   const { db, client, ui, setUi, commit, commitClient } = useStore();
-  const { taskWarnings } = useDerived();
   const [clientMenuOpen, setClientMenuOpen] = useState(false);
   const [tagsOpen, setTagsOpen] = useState(false);
+  const [workloadOpen, setWorkloadOpen] = useState(false);
 
   // Anzeigereihenfolge der Vorhaben = Array-Reihenfolge, per Ziehen aenderbar.
+  /** Welches Vorhaben gerade seine Bearbeitungsfelder zeigt. */
+  const [editing, setEditing] = useState<Id | null>(null);
+
   const ventureOrder = useReorder((from, to) =>
     commitClient('Vorhaben umsortiert', (c) => moveItem(c.ventures, from, to)),
   );
 
-  const ventureStats = (venture: Venture) => {
-    const tasks = client.tasks.filter((t) => t.ventureId === venture.id);
-    const warnings = tasks.reduce((sum, t) => sum + (taskWarnings.get(t.id)?.length ?? 0), 0);
-    return { total: tasks.length, warnings, done: isVentureDone(client, venture.id) };
-  };
+  const ventureStats = (venture: Venture) => ({
+    total: client.tasks.filter((t) => t.ventureId === venture.id).length,
+    done: isVentureDone(client, venture.id),
+  });
 
   const addVenture = () => {
     const venture = createVenture();
@@ -41,7 +44,6 @@ export function Sidebar() {
   };
 
   const totalTasks = client.tasks.length;
-  const unassignedWarnings = client.tasks.reduce((sum, t) => sum + (taskWarnings.get(t.id)?.length ?? 0), 0);
 
   return (
     <aside className="sidebar app__sidebar">
@@ -128,8 +130,9 @@ export function Sidebar() {
           onClick={() => setUi({ ventureId: null })}
         >
           <div className="venture__title">
-            Alle Vorhaben
-            {unassignedWarnings > 0 && <WarnIcon warnings={[`${unassignedWarnings} Hinweise im Mandanten`]} />}
+            <span className="grow truncate">Alle Vorhaben</span>
+            {/* Leerer Platz für den Ausklapp-Pfeil - siehe unten. */}
+            <span className="venture__slot" />
           </div>
           <div className="venture__meta">
             <span>{totalTasks} Aufgaben</span>
@@ -159,7 +162,37 @@ export function Sidebar() {
                 <div className="venture__title">
                   <span className={`status-dot status-dot--${stats.done ? 'done' : 'open'}`} />
                   <span className="grow truncate">{venture.name}</span>
-                  {stats.warnings > 0 && <WarnIcon warnings={[`${stats.warnings} Hinweise in diesem Vorhaben`]} />}
+                  {/*
+                    Fester Platz am rechten Rand für den Ausklapp-Pfeil: er ist
+                    auch dann breit, wenn der Pfeil fehlt - sonst wechselte die
+                    Breite des Namens, sobald ein Vorhaben gewählt wird.
+
+                    Warnungen stehen hier bewusst nicht mehr: sie hingen an
+                    jedem Vorhaben, ohne zu sagen woran es liegt. Wer sie sucht,
+                    findet sie im Warnzentrum und an der Aufgabe selbst.
+
+                    Umbenennen und Löschen sind seltene Eingriffe und stehen
+                    deshalb eingeklappt; der Pfeil erscheint nur am gewählten
+                    Vorhaben - eine Liste voller Bedienelemente lenkt von dem
+                    ab, wofür die Liste da ist: dem Wechseln.
+                  */}
+                  <span className="venture__slot">
+                    {active && (
+                      <button
+                        type="button"
+                        className={`venture__toggle${editing === venture.id ? ' venture__toggle--open' : ''}`}
+                        aria-expanded={editing === venture.id}
+                        title={editing === venture.id ? 'Bearbeiten schließen' : 'Vorhaben bearbeiten'}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setEditing(editing === venture.id ? null : venture.id);
+                        }}
+                      >
+                        ▾
+                      </button>
+                    )}
+                  </span>
+
                 </div>
                 <div className="venture__meta">
                   <span>{stats.total} Aufgaben</span>
@@ -167,7 +200,7 @@ export function Sidebar() {
                 </div>
               </div>
 
-              {active && (
+              {active && editing === venture.id && (
                 <div className="col" style={{ padding: 'var(--sp-2) var(--sp-2) var(--sp-3)' }}>
                   <TextInput
                     value={venture.name}
@@ -255,9 +288,18 @@ export function Sidebar() {
         >
           Tags verwalten ({client.tags.length})
         </Button>
+        <Button
+          block
+          variant="ghost"
+          onClick={() => setWorkloadOpen(true)}
+          title="Wer arbeitet in einem Zeitraum an welcher Aufgabe?"
+        >
+          Wer arbeitet woran?
+        </Button>
       </div>
 
       {tagsOpen && <TagDialog onClose={() => setTagsOpen(false)} />}
+      {workloadOpen && <WorkloadDialog onClose={() => setWorkloadOpen(false)} />}
     </aside>
   );
 }

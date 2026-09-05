@@ -2,8 +2,15 @@
  * Warnungen. Grundsatz laut Konzept: nie blockieren, nie mit Fehlerdialogen
  * stören - farblich markieren und im Tooltip erklären, was nicht stimmt.
  */
-import { isSettled, TASK_STATUS_LABEL, type Client, type Id, type Task } from '../model/types';
-import { diffDays, formatDateDe, today } from './dates';
+import {
+  isSettled,
+  TASK_STATUS_LABEL,
+  type Client,
+  type CostItem,
+  type Id,
+  type Task,
+} from '../model/types';
+import { diffDays, formatDateDe, periodEndOf, periodStartOf, today } from './dates';
 import type { ScheduledTask, ScheduleResult } from './schedule';
 import { budgetDailyLoad, budgetSeries, EMPTY_FILTER, periodValueAt, personDailyLoad } from './resources';
 
@@ -41,6 +48,28 @@ export interface Warning {
  * Überschreitung, solange noch Zeit zum Gegensteuern bleibt.
  */
 export const UTILISATION_WARN_RATIO = 0.9;
+
+/**
+ * Auslastungszustand einer Grenze.
+ *
+ *  - `over`  : überschritten,
+ *  - `exact` : genau ausgeschöpft - **kein** Grund zur Warnung. Ein Budget,
+ *              das punktgenau aufgeht, ist der Idealfall und wird deshalb
+ *              eigens (blau) dargestellt statt gemeldet,
+ *  - `warn`  : ab 90 % und darunter noch Luft,
+ *  - `ok`    : unauffällig oder gar keine Grenze gepflegt.
+ */
+export type UtilisationState = 'ok' | 'warn' | 'exact' | 'over';
+
+export function utilisationState(load: number, limit: number): UtilisationState {
+  if (limit <= 0) return 'ok';
+  // Toleranz relativ zur Grenze: bei Eurobeträgen summieren sich sonst
+  // Rundungsfehler zu einer Scheinüberschreitung von Bruchteilen eines Cents.
+  const tolerance = Math.max(1e-9, Math.abs(limit) * 1e-9);
+  if (Math.abs(load - limit) <= tolerance) return 'exact';
+  if (load > limit) return 'over';
+  return load / limit >= UTILISATION_WARN_RATIO ? 'warn' : 'ok';
+}
 
 /**
  * Ist ein Vorhaben abgeschlossen? Wird **abgeleitet** und nicht gespeichert:
@@ -217,11 +246,58 @@ export function taskWarnings(client: Client, schedule: ScheduleResult, now = tod
       }
     }
 
+    /*
+     * Wiederkehrende Kosten werden am ersten Tag ihres Rasters abgerufen
+     * (Monats-, Quartals-, Jahresbeginn). Passt die Aufgabe nicht auf dieses
+     * Raster, sind die Raten quer zur Aufgabe: eine quartalsweise Abrechnung
+     * in einer Aufgabe, die Mitte Februar beginnt, bucht ihre erste Rate erst
+     * im April - und die Summen des ersten Quartals sehen aus, als koste die
+     * Aufgabe nichts. Das ist keine Kleinigkeit, sondern verzerrt die
+     * Auswertung, deshalb wird es gemeldet.
+     */
+    if (st && !st.cyclic) {
+      for (const cost of task.costs) {
+        if (!cost.recurring || cost.interval === 'day') continue;
+        const misfit = rasterMisfit(st, cost);
+        if (!misfit) continue;
+        add(task.id, {
+          level: 'warn',
+          targetId: task.id,
+          targetKind: 'task',
+          text:
+            `"${cost.label}" wird ${INTERVAL_ADVERB[cost.interval]} abgerufen, ` +
+            `die Aufgabe ${misfit} nicht auf dieser Grenze. Die Raten liegen dadurch quer zu den Auswertungszeiträumen.`,
+        });
+      }
+    }
+
     // Statuspflege gegen den Terminplan abgleichen.
     for (const warning of statusWarnings(task, st, now)) add(task.id, warning);
   }
 
   return result;
+}
+
+/** Wie oft eine wiederkehrende Kostenposition faellig wird - als Adverb. */
+const INTERVAL_ADVERB: Record<CostItem['interval'], string> = {
+  day: 'täglich',
+  week: 'wöchentlich',
+  month: 'monatlich',
+  quarter: 'quartalsweise',
+  year: 'jährlich',
+};
+
+/**
+ * Beschreibt, an welchem Ende eine Aufgabe nicht auf dem Abrechnungsraster
+ * liegt - oder `null`, wenn beide Enden passen. Dauerläufer haben kein echtes
+ * Ende und werden deshalb nur am Start geprüft.
+ */
+function rasterMisfit(st: ScheduledTask, cost: CostItem): string | null {
+  const startFits = diffDays(periodStartOf(st.start, cost.interval), st.start) === 0;
+  const endFits = st.openEnded || diffDays(st.end, periodEndOf(st.end, cost.interval)) === 0;
+  if (startFits && endFits) return null;
+  if (!startFits && !endFits) return 'beginnt und endet';
+  return startFits ? 'endet' : 'beginnt';
 }
 
 /**
@@ -279,17 +355,18 @@ export function resourceWarnings(client: Client, schedule: ScheduleResult): Map<
     for (const [day, parts] of daily) {
       const load = parts.reduce((s, p) => s + p.value, 0);
       const limit = periodValueAt(person.availability, day, person.defaultFte);
-      if (limit <= 0) continue;
-      const ratio = load / limit;
-      if (ratio >= UTILISATION_WARN_RATIO && ratio > worstRatio) {
-        worstRatio = ratio;
+      // Genau ausgelastet ist kein Problem, sondern das Ziel - siehe
+      // `utilisationState`.
+      const state = utilisationState(load, limit);
+      if ((state === 'warn' || state === 'over') && load / limit > worstRatio) {
+        worstRatio = load / limit;
         worstLoad = load;
         worstDay = day;
       }
     }
     if (worstDay) {
       const limit = periodValueAt(person.availability, worstDay, person.defaultFte);
-      const over = worstRatio > 1 + 1e-9;
+      const over = utilisationState(worstLoad, limit) === 'over';
       add(person.id, {
         // Überschritten ist etwas anderes als knapp - das muss man auf einen
         // Blick unterscheiden können.
@@ -313,33 +390,41 @@ export function resourceWarnings(client: Client, schedule: ScheduleResult): Map<
       granularity: 'year',
       personUnit: 'FTE',
     });
+    /*
+     * Gemeldet wird ausschliesslich das **abgerufene** Geld.
+     *
+     * Eine Planung über der Obergrenze ist eine Absicht - genau dafür plant
+     * man ja: um zu sehen, dass es so nicht aufgeht. Eine Warnung daraus zu
+     * machen hiesse, jeden Entwurf sofort rot zu färben. Erst was tatsächlich
+     * abfliesst, reisst ein Budget.
+     */
     for (const point of series.points) {
-      if (point.limit <= 0) continue;
-      const ratio = point.value / point.limit;
-      if (ratio < UTILISATION_WARN_RATIO) continue;
-      const over = ratio > 1 + 1e-9;
+      const state = utilisationState(point.actual, point.limit);
+      if (state === 'ok' || state === 'exact') continue;
       add(budget.id, {
-        level: over ? 'critical' : 'warn',
+        level: state === 'over' ? 'critical' : 'warn',
         targetId: budget.id,
         targetKind: 'budget',
         text:
-          `${point.bucket.label}: ${formatEuro(point.value)} von ${formatEuro(point.limit)} ` +
-          `${over ? 'geplant - Obergrenze überschritten' : 'geplant'} (${formatPercent(ratio)}).`,
+          `${point.bucket.label}: ${formatEuro(point.actual)} von ${formatEuro(point.limit)} ` +
+          `${state === 'over' ? 'abgerufen - Obergrenze überschritten' : 'abgerufen'} ` +
+          `(${formatPercent(point.actual / point.limit)}).`,
       });
     }
-    if (budget.totalLimit > 0) {
-      const ratio = series.total / budget.totalLimit;
-      if (ratio >= UTILISATION_WARN_RATIO) {
-        const over = ratio > 1 + 1e-9;
-        add(budget.id, {
-          level: over ? 'critical' : 'warn',
-          targetId: budget.id,
-          targetKind: 'budget',
-          text:
-            `Gesamt: ${formatEuro(series.total)} von ${formatEuro(budget.totalLimit)} ` +
-            `${over ? 'geplant - Gesamtobergrenze überschritten' : 'geplant'} (${formatPercent(ratio)}).`,
-        });
-      }
+
+    const ceiling = series.ceiling;
+    const spent = series.cumulativeActualTotal;
+    const totalState = utilisationState(spent, ceiling);
+    if (totalState === 'warn' || totalState === 'over') {
+      add(budget.id, {
+        level: totalState === 'over' ? 'critical' : 'warn',
+        targetId: budget.id,
+        targetKind: 'budget',
+        text:
+          `Gesamt: ${formatEuro(spent)} von ${formatEuro(ceiling)} ` +
+          `${totalState === 'over' ? 'abgerufen - Gesamtobergrenze überschritten' : 'abgerufen'} ` +
+          `(${formatPercent(spent / ceiling)}).`,
+      });
     }
   }
 
