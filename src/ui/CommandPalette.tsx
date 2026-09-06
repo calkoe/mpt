@@ -5,6 +5,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../state/store';
 import { usePreferences } from '../state/preferences';
+import { formatShortcut, SHORTCUTS } from './shortcuts';
 import { createTask, createVenture } from '../model/factory';
 
 export interface Command {
@@ -28,7 +29,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
       {
         id: 'new-task',
         label: 'Neue Aufgabe',
-        hint: 'Alt+N',
+        hint: formatShortcut(SHORTCUTS.newTask),
         group: 'Aktionen',
         run: () => {
           const ventureId = ui.ventureId ?? client.ventures[0]?.id;
@@ -43,7 +44,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
       {
         id: 'new-venture',
         label: 'Neues Vorhaben',
-        hint: 'Alt+V',
+        hint: formatShortcut(SHORTCUTS.newVenture),
         group: 'Aktionen',
         run: () => {
           const venture = createVenture();
@@ -53,27 +54,59 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
           setUi({ ventureId: venture.id, selectedTaskId: null });
         },
       },
-      { id: 'undo', label: 'Rückgängig', hint: 'Strg+Z', group: 'Aktionen', run: undo },
-      { id: 'redo', label: 'Wiederholen', hint: 'Strg+Y', group: 'Aktionen', run: redo },
-      { id: 'save', label: 'Jetzt speichern', hint: 'Strg+S', group: 'Aktionen', run: () => void store.saveNow() },
+      { id: 'undo', label: 'Rückgängig', hint: formatShortcut(SHORTCUTS.undo), group: 'Aktionen', run: undo },
+      { id: 'redo', label: 'Wiederholen', hint: formatShortcut(SHORTCUTS.redo), group: 'Aktionen', run: redo },
+      { id: 'save', label: 'Jetzt speichern', hint: formatShortcut(SHORTCUTS.save), group: 'Aktionen', run: () => void store.saveNow() },
+      /*
+       * Dieselben vier Ansichten wie Alt+1..4 - mit denselben Beschriftungen
+       * und derselben Wirkung. Vorher standen hier zwei Einträge, die nur den
+       * Modus umschalteten und dabei ein Kürzel nannten, das etwas anderes
+       * tat (Alt+2 ist der Gantt, nicht die Ressourcenübersicht).
+       */
       {
-        id: 'view-tasks',
-        label: 'Ansicht: Aufgabenübersicht',
-        hint: 'Alt+1',
+        id: 'view-network',
+        label: SHORTCUTS.viewNetwork.label,
+        hint: formatShortcut(SHORTCUTS.viewNetwork),
         group: 'Ansicht',
-        run: () => setUi({ mode: 'tasks' }),
+        run: () => {
+          setUi({ mode: 'tasks' });
+          setPrefs({ taskView: 'network' });
+        },
       },
       {
-        id: 'view-resources',
-        label: 'Ansicht: Ressourcenübersicht',
-        hint: 'Alt+2',
+        id: 'view-gantt',
+        label: SHORTCUTS.viewGantt.label,
+        hint: formatShortcut(SHORTCUTS.viewGantt),
         group: 'Ansicht',
-        run: () => setUi({ mode: 'resources' }),
+        run: () => {
+          setUi({ mode: 'tasks' });
+          setPrefs({ taskView: 'gantt' });
+        },
+      },
+      {
+        id: 'view-resource-chart',
+        label: SHORTCUTS.viewResourceChart.label,
+        hint: formatShortcut(SHORTCUTS.viewResourceChart),
+        group: 'Ansicht',
+        run: () => {
+          setUi({ mode: 'resources' });
+          setPrefs({ resourceView: 'chart' });
+        },
+      },
+      {
+        id: 'view-resource-table',
+        label: SHORTCUTS.viewResourceTable.label,
+        hint: formatShortcut(SHORTCUTS.viewResourceTable),
+        group: 'Ansicht',
+        run: () => {
+          setUi({ mode: 'resources' });
+          setPrefs({ resourceView: 'table' });
+        },
       },
       {
         id: 'toggle-view',
         label: prefs.taskView === 'network' ? 'Zu Gantt-Chart wechseln' : 'Zu Netzplan wechseln',
-        hint: 'Alt+G',
+        hint: formatShortcut(SHORTCUTS.togglePlan),
         group: 'Ansicht',
         run: () => setPrefs({ taskView: prefs.taskView === 'network' ? 'gantt' : 'network' }),
       },

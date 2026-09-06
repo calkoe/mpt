@@ -622,6 +622,7 @@ function NoteView({
             autoFocus
             value={note.text}
             placeholder="Notiz… (leer lassen zum Löschen)"
+            title="Freier Merkzettel auf der Planfläche. Gehört zu keiner Aufgabe und geht in keine Rechnung ein; leer geschrieben verschwindet er."
             onChange={onChange}
             /* Leer wird nie zwischengespeichert - siehe onDone. */
             commitIf={(text) => text.trim().length > 0}

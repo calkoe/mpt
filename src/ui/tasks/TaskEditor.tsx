@@ -47,6 +47,7 @@ import {
 import { fitsScale, PeriodPicker } from '../components/PeriodPicker';
 import { CostFields } from '../components/CostFields';
 import { AssignmentFields } from '../components/AssignmentFields';
+import { formatShortcut, SHORTCUTS } from '../shortcuts';
 
 export function TaskEditor({
   client,
@@ -110,11 +111,13 @@ export function TaskEditor({
           className="input--title"
           value={task.title}
           placeholder="Titel der Aufgabe"
+          title="Name der Aufgabe. Steht im Plan, in der Schnellsuche und in jeder Auswertung - eindeutige Namen sparen später das Nachschlagen."
           onChange={(title) => edit('Titel geändert', (t) => { t.title = title; }, `title-${task.id}`)}
         />
         <Segmented<TaskStatus>
           block
           ariaLabel="Status"
+          title="Zustand der Aufgabe. 'Abgeschlossen' und 'Betrieb' gelten als fertig: sie erzeugen keine Warnungen mehr und zählen für den Vorhabenstatus - Termine verschieben sie nicht."
           value={task.status}
           onChange={(status) => edit('Status geändert', (t) => { t.status = status; })}
           options={(Object.keys(TASK_STATUS_LABEL) as TaskStatus[]).map((s) => ({
@@ -139,6 +142,7 @@ export function TaskEditor({
           rows={5}
           value={task.description}
           placeholder="Kurzbeschreibung"
+          title="Freier Text zur Aufgabe. Erscheint als Tooltip im Plan und im KI-Austausch; auf die Rechnung wirkt er nicht."
           onChange={(description) => edit('Beschreibung geändert', (t) => { t.description = description; }, `desc-${task.id}`)}
         />
         <LinkPanel task={task} client={client} taskById={taskById} edit={edit} />
@@ -157,11 +161,14 @@ export function TaskEditor({
           <Switch
             checked={task.milestone}
             label="Ist Meilenstein"
-            title="Meilensteine werden im Netzplan hervorgehoben und erzeugen im Gantt eine senkrechte Linie am Enddatum"
+            title="Kennzeichnet einen Termin statt einer Arbeit. Im Netzplan hervorgehoben, im Gantt eine senkrechte Linie am Ende - Dauer und Rechnung bleiben unberührt."
             onChange={(milestone) => edit('Meilenstein umgeschaltet', (t) => { t.milestone = milestone; })}
           />
 
-          <Field label="Start ergibt sich aus">
+          <Field
+            label="Start ergibt sich aus"
+            title="Woher der Beginn kommt: aus einem festen Datum oder aus den Vorgängern (spätestes Vorgängerende + 1 Arbeitstag). Bei 'Vorgängern' wandert die Aufgabe mit, sobald sich davor etwas verschiebt."
+          >
             <Segmented
               block
               value={task.schedule.anchor}
@@ -172,8 +179,16 @@ export function TaskEditor({
                 })
               }
               options={[
-                { value: 'date', label: 'Festes Datum' },
-                { value: 'dependency', label: 'Vorgängern', title: 'Start = spätestes Ende der Vorgänger + 1 Arbeitstag' },
+                {
+                  value: 'date',
+                  label: 'Festes Datum',
+                  title: 'Der Beginn steht fest und bleibt stehen, auch wenn sich Vorgänger verschieben.',
+                },
+                {
+                  value: 'dependency',
+                  label: 'Vorgängern',
+                  title: 'Start = spätestes Ende der Vorgänger + 1 Arbeitstag. Die Aufgabe wandert mit.',
+                },
               ]}
             />
           </Field>
@@ -206,6 +221,7 @@ export function TaskEditor({
             >
               {exactDates ? (
                 <DateInput
+                  title="Erster Arbeitstag der Aufgabe. Fällt er auf ein Wochenende, beginnt sie am nächsten Werktag; alle Nachfolger rücken mit."
                   value={task.schedule.start}
                   onChange={(start) => edit('Start geändert', (t) => { t.schedule.start = start || undefined; })}
                 />
@@ -215,6 +231,7 @@ export function TaskEditor({
                      abgeleitet statt von der vorigen Aufgabe übernommen. */
                   key={task.id}
                   mode="start"
+                  title="Beginn im Raster - der erste Tag des gewählten Zeitraums wird zum Starttermin. Nachfolger rücken mit."
                   from={task.schedule.start}
                   onChange={(from) => edit('Beginn geändert', (t) => { t.schedule.start = from; })}
                 />
@@ -235,6 +252,7 @@ export function TaskEditor({
             <Segmented<DurationUnit>
               block
               ariaLabel="Einheit der Dauer"
+              title="Maßstab beider Dauern. AT zählt nur Arbeitstage; Wochen, Monate und Jahre sind Kalenderzeit und überspringen Wochenenden nicht."
               value={durationUnit}
               onChange={(unit) => edit('Dauereinheit geändert', (t) => { t.schedule.durationUnit = unit; })}
               options={(['days', 'weeks', 'months', 'years'] as DurationUnit[]).map((u) => ({
@@ -258,6 +276,7 @@ export function TaskEditor({
               min={0}
               max={sliderMaxFor(durationUnit)}
               step={1}
+              title="Optimistische Dauer. Im Szenario 'opt.' bestimmt sie Ende, Puffer und kritischen Pfad. 0 heißt: kein Enddatum, die Aufgabe läuft dauerhaft."
               value={task.schedule.durationMin}
               suffix={DURATION_UNIT_LABEL[durationUnit]}
               onChange={(value) =>
@@ -277,6 +296,7 @@ export function TaskEditor({
               min={0}
               max={sliderMaxFor(durationUnit)}
               step={1}
+              title="Pessimistische Dauer. Sie gilt im Szenario 'pess.', spannt die Unschärfe im Gantt auf und legt das äußere Projektende fest."
               value={task.schedule.durationMax}
               suffix={DURATION_UNIT_LABEL[durationUnit]}
               onChange={(value) =>
@@ -291,6 +311,7 @@ export function TaskEditor({
           <div className="editor__section-title">Vorhaben</div>
           <select
             className="select"
+            title="Ordnet die Aufgabe einem Vorhaben zu. Steuert Seitenleiste, Filter und den abgeleiteten Vorhabenstatus - Termine ändert der Wechsel nicht."
             value={task.ventureId}
             onChange={(e) => edit('Vorhaben gewechselt', (t) => { t.ventureId = e.target.value; })}
           >
@@ -318,6 +339,7 @@ export function TaskEditor({
           </div>
           <Combobox
             placeholder="Tag wählen oder anlegen..."
+            title="Ordnet der Aufgabe ein Schlagwort zu. Tags filtern Plan und Ressourcenansicht und färben die Marken am Knoten; ein neuer Name legt das Tag gleich an."
             options={client.tags.filter((t) => !task.tagIds.includes(t.id)).map((t) => ({ id: t.id, label: t.name, color: t.color }))}
             onSelect={(id) => edit('Tag ergänzt', (t) => { if (!t.tagIds.includes(id)) t.tagIds.push(id); })}
             onCreate={(name) =>
@@ -359,6 +381,7 @@ export function TaskEditor({
           </div>
           <Combobox
             placeholder="Person wählen oder anlegen..."
+            title="Weist der Aufgabe eine Person zu. Der Aufwand darunter verteilt sich über die Laufzeit und geht in Auslastung, Ganglinien und Warnungen ein."
             options={client.people
               .filter((p) => !task.assignments.some((a) => a.personId === p.id))
               .map((p) => ({ id: p.id, label: p.name, hint: p.role || `${p.defaultFte} FTE` }))}
@@ -399,6 +422,7 @@ export function TaskEditor({
 
           <Combobox
             placeholder="Budget wählen oder anlegen..."
+            title="Legt eine Kostenposition auf ein Budget. Die Beträge darunter werden zur Laufzeit der Aufgabe fällig und zählen gegen dessen Obergrenze."
             options={client.budgets.map((b) => ({ id: b.id, label: b.name }))}
             onSelect={(id) => edit('Kostenposition ergänzt', (t) => { t.costs.push(createCost(id)); })}
             onCreate={(name) =>
@@ -459,6 +483,7 @@ export function TaskEditor({
               className="checklist__text"
               value={item.text}
               placeholder="Punkt..."
+              title="Ein Schritt innerhalb der Aufgabe. Der Fortschritt (z.B. 1/2) erscheint am Knoten im Plan; auf Termine und Kosten wirkt er nicht."
               onChange={(text) =>
                 edit('Checkliste bearbeitet', (t) => {
                   const target = t.checklist.find((c) => c.id === item.id);
@@ -580,15 +605,32 @@ function LinkPanel({
       <Segmented<LinkKind>
         block
         ariaLabel="Art der Verknüpfung"
+        title="Welche Art von Verknüpfung unten ergänzt wird - jede wirkt anders auf die Rechnung."
         value={kind}
         onChange={setKind}
-        options={(Object.keys(LINK_LABEL) as LinkKind[]).map((k) => ({ value: k, label: LINK_LABEL[k] }))}
+        options={(Object.keys(LINK_LABEL) as LinkKind[]).map((k) => ({
+          value: k,
+          label: LINK_LABEL[k],
+          title:
+            k === 'dependsOn'
+              ? 'Vorgänger: diese Aufgabe startet frühestens einen Arbeitstag nach dem spätesten Vorgängerende.'
+              : k === 'parallelWith'
+                ? 'Parallel: die genannten Aufgaben müssen laufen, solange diese läuft - gemeldet wird nur, wenn nicht.'
+                : 'Bedingung: muss erfüllt sein, verschiebt aber keine Termine - es entsteht eine Warnung.',
+        }))}
       />
 
       <div className="row">
         <div className="grow">
           <Combobox
             placeholder={kind === 'condition' ? 'Bedingung oder Vorhaben...' : 'Aufgabe suchen...'}
+            title={
+              kind === 'condition'
+                ? 'Bedingung oder Vorhaben, das erfüllt sein muss. Wirkt nur als Warnung - Termine verschiebt es nicht.'
+                : kind === 'parallelWith'
+                  ? 'Aufgabe, die mitlaufen muss. Läuft sie nicht, meldet das Warnzentrum es; die Terminrechnung bleibt unberührt.'
+                  : 'Vorgänger dieser Aufgabe. Ihr Ende bestimmt den frühesten Start hier - und damit den ganzen Strang dahinter.'
+            }
             options={options}
             onSelect={select}
             onCreate={
@@ -794,7 +836,7 @@ export function TaskEditorHeader({
       {descendants.length > 0 && (
         <ConfirmButton
           onConfirm={() => remove(true)}
-          title={`Löscht zusätzlich ${descendants.length} abhängige Aufgabe(n): ${cascadeTitles} - kann mit Strg+Z rückgängig gemacht werden`}
+          title={`Löscht zusätzlich ${descendants.length} abhängige Aufgabe(n): ${cascadeTitles} - kann mit ${formatShortcut(SHORTCUTS.undo)} rückgängig gemacht werden`}
           confirmLabel={`Wirklich ${descendants.length + 1} löschen?`}
         >
           Mit {descendants.length} Nachfolgern

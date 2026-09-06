@@ -20,6 +20,7 @@ import { usePreferences } from './state/preferences';
 import { createTask, createVenture, duplicateTask } from './model/factory';
 import { isFileSystemAccessSupported, recallHandle } from './persistence/fileStore';
 import { APP_VERSION, PROJECT_URL } from './version';
+import { matches, shortcut, type ShortcutId } from './ui/shortcuts';
 
 type Overlay = 'palette' | 'warnings' | 'guide';
 
@@ -79,6 +80,25 @@ export function App() {
   };
 
   /*
+   * Ist Text markiert? Dann gehoert Kopieren dem Browser. Ohne diese Frage
+   * schluckte MPT das Kopieren einer markierten Stelle im Plan und legte
+   * stattdessen die gewaehlte Aufgabe in seine eigene Ablage.
+   */
+  const hasSelection = (event: KeyboardEvent) => {
+    const view = (event.target as HTMLElement | null)?.ownerDocument?.defaultView ?? window;
+    const selection = view.getSelection?.();
+    return Boolean(selection && !selection.isCollapsed);
+  };
+
+  /**
+   * Das Oeffnen einer Datei lebt in der Kopfzeile (mit Sperrpruefung, Hinweisen
+   * und Fehleranzeige). Fuer Alt+O meldet sie ihre Funktion hier an - direkt
+   * aufgerufen aus dem Tastendruck heraus, damit die Nutzergeste erhalten
+   * bleibt: der Dateiwaehler des Browsers oeffnet sonst nicht.
+   */
+  const openFileRef = useRef<(() => void) | null>(null);
+
+  /*
    * Overlays liegen immer im Hauptfenster. Kommt das Kürzel aus der
    * ausgelagerten Ansicht, wird das Hauptfenster mit nach vorn geholt - sonst
    * ginge die Befehlspalette hinter dem zweiten Fenster auf.
@@ -88,28 +108,51 @@ export function App() {
     window.focus();
   }, []);
 
+  /*
+   * Alle Kuerzel kommen aus `ui/shortcuts.ts` - dieselbe Quelle, aus der auch
+   * die Beschriftungen stammen. Verglichen wird ueber die physische Taste und
+   * das Zeichen zugleich; warum, steht dort ausfuehrlich.
+   */
   const onKeyDown = useCallback(
     (event: KeyboardEvent) => {
-      const mod = event.ctrlKey || event.metaKey;
+      const typing = isTyping(event);
+      /*
+       * Waehrend getippt wird, greifen nur Kuerzel, die im Feld dasselbe
+       * bedeuten (Speichern, Befehle). Rueckgaengig gehoert nicht dazu: dort
+       * ist Strg+Z die Ruecknahme des Tippfehlers - vorher nahm MPT
+       * stattdessen die letzte Planaenderung zurueck.
+       */
+      const hit = (id: ShortcutId) => {
+        const sc = shortcut(id);
+        if (typing && !sc.whileTyping) return false;
+        return matches(sc, event);
+      };
 
-      if (mod && event.key.toLowerCase() === 'k') {
+      if (hit('palette')) {
         event.preventDefault();
         openOverlay('palette');
         return;
       }
-      if (mod && event.key.toLowerCase() === 'z' && !event.shiftKey) {
+      if (hit('save')) {
         event.preventDefault();
-        store.undo();
+        void store.saveNow();
         return;
       }
-      if (mod && (event.key.toLowerCase() === 'y' || (event.key.toLowerCase() === 'z' && event.shiftKey))) {
+      if (hit('open')) {
+        event.preventDefault();
+        openFileRef.current?.();
+        return;
+      }
+      // Reihenfolge: Wiederholen vor Rueckgaengig - Umschalt+Cmd+Z traegt
+      // beide Bedingungen, und die engere gewinnt.
+      if (hit('redo')) {
         event.preventDefault();
         store.redo();
         return;
       }
-      if (mod && event.key.toLowerCase() === 's') {
+      if (hit('undo')) {
         event.preventDefault();
-        void store.saveNow();
+        store.undo();
         return;
       }
       if (event.key === 'Escape' && store.ui.pickTarget) {
@@ -120,9 +163,9 @@ export function App() {
       /*
        * Aufgaben kopieren. Bewusst eine eigene Ablage statt der System-
        * Zwischenablage: die Aufgabe wird als Objekt uebernommen, nicht als
-       * Text, und Kopieren in einem Textfeld soll weiterhin Text kopieren.
+       * Text. Markierter Text und Textfelder behalten deshalb ihr Kopieren.
        */
-      if (mod && event.key.toLowerCase() === 'c' && !isTyping(event) && store.ui.selectedTaskId) {
+      if (hit('copyTask') && !hasSelection(event) && store.ui.selectedTaskId) {
         const task = store.client.tasks.find((t) => t.id === store.ui.selectedTaskId);
         if (task) {
           event.preventDefault();
@@ -130,7 +173,7 @@ export function App() {
         }
         return;
       }
-      if (mod && event.key.toLowerCase() === 'v' && !isTyping(event) && clipboard.current) {
+      if (hit('pasteTask') && clipboard.current) {
         const source = store.client.tasks.find((t) => t.id === clipboard.current);
         if (!source) return;
         event.preventDefault();
@@ -144,63 +187,65 @@ export function App() {
         return;
       }
 
-      if (!event.altKey || isTyping(event)) return;
-
-      switch (event.key.toLowerCase()) {
-        // Alt+1..4 springen direkt in die vier gängigen Ansichten.
-        case '1':
-          event.preventDefault();
-          store.setUi({ mode: 'tasks' });
-          setPrefs({ taskView: 'network' });
-          break;
-        case '2':
-          event.preventDefault();
-          store.setUi({ mode: 'tasks' });
-          setPrefs({ taskView: 'gantt' });
-          break;
-        case '3':
-          event.preventDefault();
-          store.setUi({ mode: 'resources' });
-          setPrefs({ resourceView: 'chart' });
-          break;
-        case '4':
-          event.preventDefault();
-          store.setUi({ mode: 'resources' });
-          setPrefs({ resourceView: 'table' });
-          break;
-        case 'g':
-          event.preventDefault();
-          store.setUi({ mode: 'tasks' });
-          setPrefs({ taskView: prefs.taskView === 'network' ? 'gantt' : 'network' });
-          break;
-        case 'w':
-          event.preventDefault();
-          openOverlay('warnings');
-          break;
-        case 'h':
-          event.preventDefault();
-          openOverlay('guide');
-          break;
-        case 'n': {
-          event.preventDefault();
-          const ventureId = store.ui.ventureId ?? store.client.ventures[0]?.id;
-          if (!ventureId) return;
-          const task = createTask(ventureId);
-          store.commitClient('Aufgabe angelegt', (c) => {
-            c.tasks.push(task);
-          });
-          store.setUi({ mode: 'tasks', selectedTaskId: task.id, ventureId });
-          break;
-        }
-        case 'v': {
-          event.preventDefault();
-          const venture = createVenture();
-          store.commitClient('Vorhaben angelegt', (c) => {
-            c.ventures.push(venture);
-          });
-          store.setUi({ ventureId: venture.id, selectedTaskId: null });
-          break;
-        }
+      // Alt+1..4 springen direkt in die vier gaengigen Ansichten.
+      if (hit('viewNetwork')) {
+        event.preventDefault();
+        store.setUi({ mode: 'tasks' });
+        setPrefs({ taskView: 'network' });
+        return;
+      }
+      if (hit('viewGantt')) {
+        event.preventDefault();
+        store.setUi({ mode: 'tasks' });
+        setPrefs({ taskView: 'gantt' });
+        return;
+      }
+      if (hit('viewResourceChart')) {
+        event.preventDefault();
+        store.setUi({ mode: 'resources' });
+        setPrefs({ resourceView: 'chart' });
+        return;
+      }
+      if (hit('viewResourceTable')) {
+        event.preventDefault();
+        store.setUi({ mode: 'resources' });
+        setPrefs({ resourceView: 'table' });
+        return;
+      }
+      if (hit('togglePlan')) {
+        event.preventDefault();
+        store.setUi({ mode: 'tasks' });
+        setPrefs({ taskView: prefs.taskView === 'network' ? 'gantt' : 'network' });
+        return;
+      }
+      if (hit('warnings')) {
+        event.preventDefault();
+        openOverlay('warnings');
+        return;
+      }
+      if (hit('guide')) {
+        event.preventDefault();
+        openOverlay('guide');
+        return;
+      }
+      if (hit('newTask')) {
+        event.preventDefault();
+        const ventureId = store.ui.ventureId ?? store.client.ventures[0]?.id;
+        if (!ventureId) return;
+        const task = createTask(ventureId);
+        store.commitClient('Aufgabe angelegt', (c) => {
+          c.tasks.push(task);
+        });
+        store.setUi({ mode: 'tasks', selectedTaskId: task.id, ventureId });
+        return;
+      }
+      if (hit('newVenture')) {
+        event.preventDefault();
+        const venture = createVenture();
+        store.commitClient('Vorhaben angelegt', (c) => {
+          c.ventures.push(venture);
+        });
+        store.setUi({ ventureId: venture.id, selectedTaskId: null });
       }
     },
     [openOverlay, prefs.taskView, setPrefs, store],
@@ -228,6 +273,9 @@ export function App() {
           onOpenPalette={() => setOverlay('palette')}
           onOpenWarnings={() => setOverlay('warnings')}
           onOpenGuide={() => setOverlay('guide')}
+          onProvideOpen={(fn) => {
+            openFileRef.current = fn;
+          }}
           recalled={recalled}
           onRecalledHandled={() => setRecalled(null)}
         />

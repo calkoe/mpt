@@ -163,10 +163,13 @@ export function PeriodPicker({
   mode = 'range',
   total,
   scales,
+  title,
 }: {
   from?: IsoDate;
   to?: IsoDate;
   onChange: (from: IsoDate, to: IsoDate) => void;
+  /** Erklärt, wofür der Zeitraum steht - liegt auf der ganzen Auswahl. */
+  title?: string;
   /**
    * Bietet zusätzlich "Gesamt" an und liefert dafür diesen Bereich. Gedacht
    * für Summen, die wahlweise über einen Zeitraum oder über alles gehen.
@@ -224,11 +227,12 @@ export function PeriodPicker({
   };
 
   return (
-    <div className="period">
+    <div className="period" title={title}>
       <select
         className="select period__year"
         value={selection.year}
         aria-label="Jahr"
+        title="Jahr, in dem der gewählte Zeitraum liegt. Die Stufe daneben bestimmt, wie fein er darin geschnitten wird."
         disabled={selection.scale === 'total'}
         onChange={(e) => apply({ year: Number(e.target.value) })}
       >
@@ -241,6 +245,7 @@ export function PeriodPicker({
 
       <Segmented<PeriodScale>
         ariaLabel="Stufe"
+        title="Körnung der Auswahl. Der Zeitpunkt bleibt beim Wechsel stehen, nur der Zuschnitt ändert sich - aus einem Septembertermin wird der Monat September, das dritte Quartal oder das Jahr."
         value={selection.scale}
         onChange={(scale) => apply({ scale })}
         options={(scales ?? DEFAULT_SCALES).filter((sc) => sc !== 'total' || total).map((sc) => SCALE_OPTION[sc])}
@@ -249,6 +254,7 @@ export function PeriodPicker({
       {selection.scale === 'quarter' && (
         <Segmented<string>
           ariaLabel="Quartal"
+          title="Quartal innerhalb des Jahres - drei Monate vom Ersten bis zum Letzten."
           value={String(selection.index)}
           onChange={(value) => apply({ index: Number(value) })}
           options={[1, 2, 3, 4].map((q) => ({ value: String(q), label: `Q${q}` }))}
@@ -260,6 +266,7 @@ export function PeriodPicker({
           className="select period__month"
           value={selection.index}
           aria-label="Monat"
+          title="Monat innerhalb des Jahres. Der Zeitraum reicht vom Ersten bis zum Letzten dieses Monats."
           onChange={(e) => apply({ index: Number(e.target.value) })}
         >
           {MONTH_LABEL.map((label, i) => (
@@ -275,6 +282,7 @@ export function PeriodPicker({
           className="select period__month"
           value={selection.index}
           aria-label="Kalenderwoche"
+          title="Kalenderwoche nach ISO - sie beginnt am Montag und kann am Jahreswechsel zum Nachbarjahr gehören."
           onChange={(e) => apply({ index: Number(e.target.value) })}
         >
           {Array.from({ length: weeksInIsoYear(selection.year) }, (_, i) => i + 1).map((w) => (

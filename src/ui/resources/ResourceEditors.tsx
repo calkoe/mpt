@@ -64,6 +64,7 @@ export function PersonEditor({
         className="input--title"
         value={person.name}
         placeholder="Name"
+        title="Name der Person. Er steht in der Ressourcenleiste, in den Ganglinien und in jeder Auswertung."
         onChange={(name) => edit('Person umbenannt', (p) => { p.name = name; }, `person-name-${person.id}`)}
       />
 
@@ -74,6 +75,7 @@ export function PersonEditor({
             <TextInput
               value={person.role}
               placeholder="z.B. Entwicklung"
+              title="Freie Bezeichnung der Tätigkeit. Erscheint neben dem Namen und in der Analyse „Wer arbeitet woran?“; auf die Rechnung wirkt sie nicht."
               onChange={(role) => edit('Rolle geändert', (p) => { p.role = role; }, `person-role-${person.id}`)}
             />
           </Field>
@@ -83,6 +85,7 @@ export function PersonEditor({
               min={0}
               max={1}
               step={0.1}
+              title="Verfügbare Kapazität als Anteil einer Vollzeitstelle. Sie ist der Maßstab für die Auslastung: ab 90 % der Kapazität warnt MPT, darüber wird der Balken rot."
               value={person.defaultFte}
               onChange={(defaultFte) => edit('Verfügbarkeit geändert', (p) => { p.defaultFte = defaultFte; }, `person-fte-${person.id}`)}
             />
@@ -216,6 +219,7 @@ export function BudgetEditor({
         className="input--title"
         value={budget.name}
         placeholder="Name"
+        title="Name des Budgets. Kostenpositionen an Aufgaben verweisen darauf; er steht in Ganglinien und Auswertungen."
         onChange={(name) => edit('Budget umbenannt', (b) => { b.name = name; }, `budget-name-${budget.id}`)}
       />
 
@@ -226,6 +230,7 @@ export function BudgetEditor({
             <Segmented<BudgetKind>
               block
               ariaLabel="Art des Budgets"
+              title="Trennt die Gesamtsummen in der Übersicht - Beauftragungen, Investitionen und Neutrales werden getrennt aufaddiert. Auf die einzelne Position wirkt die Art nicht."
               value={budget.kind}
               onChange={(kind) => edit('Budgetart geändert', (b) => { b.kind = kind; })}
               options={(Object.keys(BUDGET_KIND_LABEL) as BudgetKind[]).map((k) => ({
@@ -250,7 +255,11 @@ export function BudgetEditor({
 
           <div className="editor__section-title">Obergrenze gesamt</div>
           <Field label="Über die gesamte Laufzeit" hint="0 = keine Obergrenze">
-            <AmountInput value={budget.totalLimit} onChange={(totalLimit) => edit('Obergrenze geändert', (b) => { b.totalLimit = totalLimit; }, `budget-total-${budget.id}`)} />
+            <AmountInput
+              title="Genehmigter Rahmen über die ganze Laufzeit. MPT warnt, wenn die geplanten Kosten ihn ausschöpfen; 0 heißt: keine Obergrenze - nicht Obergrenze null."
+              value={budget.totalLimit}
+              onChange={(totalLimit) => edit('Obergrenze geändert', (b) => { b.totalLimit = totalLimit; }, `budget-total-${budget.id}`)}
+            />
           </Field>
         </div>
 
@@ -370,14 +379,27 @@ function PeriodValueList({
             <div className="col">
               {/* Quartal oder Jahr genuegt - taggenau wird hier nicht geplant. */}
               <PeriodPicker
+                title="Zeitraum, für den der Wert daneben gilt. Er ersetzt darin den Standardwert; außerhalb bleibt es beim Standard."
                 from={entry.from}
                 to={entry.to}
                 onChange={(from, to) => onChange(entry.id, { from, to })}
               />
               {unit === 'FTE' ? (
-                <NumberSlider min={0} max={1} step={0.1} value={entry.value} suffix="FTE" onChange={(value) => onChange(entry.id, { value })} />
+                <NumberSlider
+                  min={0}
+                  max={1}
+                  step={0.1}
+                  title="Verfügbarkeit in diesem Zeitraum - etwa für Elternzeit oder eine befristete Aufstockung. Gilt statt des Standardwerts."
+                  value={entry.value}
+                  suffix="FTE"
+                  onChange={(value) => onChange(entry.id, { value })}
+                />
               ) : (
-                <AmountInput value={entry.value} onChange={(value) => onChange(entry.id, { value })} />
+                <AmountInput
+                  title="Obergrenze in diesem Zeitraum, typisch ein Kalenderjahr. Sie tritt neben die Gesamtgrenze - beide werden geprüft."
+                  value={entry.value}
+                  onChange={(value) => onChange(entry.id, { value })}
+                />
               )}
             </div>
             <Button variant="ghost" icon title="Zeitraum entfernen" onClick={() => onRemove(entry.id)}>
@@ -426,6 +448,7 @@ function ResourceTags({
       </div>
       <Combobox
         placeholder="Tag wählen oder anlegen..."
+        title="Schlagwort für diese Ressource. Tags filtern die Ressourcenansicht und die Ganglinien; ein neuer Name legt das Tag gleich an."
         options={client.tags
           .filter((t) => !tagIds.includes(t.id))
           .map((t) => ({ id: t.id, label: t.name, color: t.color }))}

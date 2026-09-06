@@ -85,10 +85,11 @@ export function AiDialog({ onClose }: { onClose: () => void }) {
     >
       <Segmented
         value={tab}
+        title="Richtung des Austauschs: Bestand als Text herausgeben oder eine bearbeitete Fassung wieder einlesen."
         onChange={(t) => setTab(t as "export" | "import")}
         options={[
-          { value: "export", label: "Export" },
-          { value: "import", label: "Import" },
+          { value: "export", label: "Export", title: "Bestand samt Schemabeschreibung zum Kopieren." },
+          { value: "import", label: "Import", title: "Bearbeitete Fassung einlesen - vor der Übernahme wird der Unterschied gezeigt." },
         ]}
       />
 

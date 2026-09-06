@@ -11,12 +11,14 @@
 <a href="https://calkoe.github.io/mpt/"><img src="https://img.shields.io/badge/%E2%96%B6%20Jetzt%20im%20Browser%20starten-3559d9?style=for-the-badge&logoColor=white" alt="MPT im Browser starten" height="42"></a>
 
 <sub>Öffnet die fertige Anwendung direkt – keine Installation, keine Anmeldung.<br>
-Zum Mitnehmen: Seite speichern (<kbd>Strg</kbd>+<kbd>S</kbd>) – die Datei läuft danach auch offline per Doppelklick.</sub>
+Zum Mitnehmen: <a href="https://github.com/calkoe/mpt/releases/latest">die <code>index.html</code> aus dem letzten Release</a> – eine Datei, die auch ohne Netz läuft.<br>
+Automatisch in deine Datei schreiben kann sie nur über <code>https</code> oder <code>localhost</code>,
+<a href="#wann-das-automatische-speichern-funktioniert">nicht per Doppelklick</a>.</sub>
 
 <br><br>
 
 [![Build](https://img.shields.io/badge/build-single--file-3559d9)](.github/workflows/build.yml)
-[![Tests](https://img.shields.io/badge/tests-100%20passing-1c7c59)](src/engine/engine.test.ts)
+[![Tests](https://img.shields.io/badge/tests-127%20passing-1c7c59)](src/engine/engine.test.ts)
 [![Lizenz](https://img.shields.io/badge/lizenz-MIT-696e79)](#lizenz)
 [![Quelltext](https://img.shields.io/badge/quelltext-github.com%2Fcalkoe%2Fmpt-24292f)](https://github.com/calkoe/mpt)
 
@@ -31,12 +33,33 @@ angebundenen Ressourcen und Bedingungen, unten die Aufgabe zur Direktbearbeitung
 
 ---
 
+## Was MPT leistet
+
+MPT plant Vorhaben von der ersten Aufgabe bis zur Auslastung der Beteiligten. Aufgaben werden
+verkettet, ihre Dauer als Spanne zwischen optimistisch und pessimistisch angegeben; **Termine,
+kritischer Pfad und Puffer** rechnet MPT daraus nach dem klassischen CPM-Verfahren – wahlweise für
+das eine oder das andere Szenario. Netzplan und Balkenplan zeigen denselben Plan aus zwei
+Blickwinkeln, vom Tagesraster bis zur Zehnjahressicht.
+
+An denselben Aufgaben hängen die Ressourcen: **Personen** in Personentagen oder FTE, **Budgets**
+getrennt nach genehmigt, geplant und ausgegeben. Daraus entstehen Ganglinien über die gesamte
+Laufzeit, Auslastungswarnungen, bevor eine Person überbucht ist, und Auswertungen, die jede Summe
+bis auf die einzelne Position aufschlüsseln. Ein Warnzentrum sammelt, was nicht zusammenpasst –
+überfällige Aufgaben, offene Bedingungen, ausgeschöpfte Budgets. Dazu kommen Mandanten, Vorhaben,
+Tags und Bedingungen als Ordnung, ein Verlauf mit Wiederherstellungspunkten, Export nach CSV und
+PNG sowie ein Austauschformat, mit dem sich ein ganzer Plan von einem Sprachmodell umbauen lässt.
+
 ## Einfach. Und deine Daten bleiben deine.
 
-**Einfachheit** eine Aufgabe anlegen kostet einen Klick,
-verketten einen weiteren. Überall Auswahlfelder mit Autovervollständigung, Zahlen als Schieber,
-Ja/Nein als Schalter. Was du eingibst, wirkt sofort – es gibt keinen Speichern-Knopf und keine
-Formulare, die man erst absenden muss.
+Eine Aufgabe anzulegen kostet
+einen Klick, sie zu verketten einen weiteren – im Netzplan über das grüne „+" an der Kante. Überall
+Auswahlfelder mit Autovervollständigung, Zahlen als Schieber, Ja/Nein als Schalter; Personen,
+Budgets und Tags entstehen beim Tippen ihres Namens. Jede Eingabe wirkt sofort und ist rücknehmbar:
+es gibt keinen Speichern-Knopf, kein Formular zum Absenden und keinen Dialog, der eine Entscheidung
+erzwingt. **Jedes Eingabefeld erklärt beim Überfahren, was es setzt und was daraus folgt**, jede
+Ansicht ist über die Tastatur erreichbar, und wer lieber tippt als klickt, kommt mit der
+Befehlspalette überall hin. Die Oberfläche zeigt in jedem Moment nur das, was zur Sache gehört –
+alles Weitere liegt einen Klick entfernt, nicht in einem Untermenü.
 
 **Datenschutz durch Bauweise, nicht durch Versprechen.** MPT ist eine einzelne `index.html`, die
 vollständig in deinem Browser läuft:
@@ -80,10 +103,10 @@ Budgets und Mandantendaten bleiben schlicht da, wo sie hingehören.
 | **Warnzentrum**           | Alle Hinweise an einer Stelle: überfällige Aufgaben, offene Bedingungen, Personen und Budgets ab 90 % Auslastung.    |
 | **Parallelität**          | „Solange A läuft, müssen B und C laufen" – wird geprüft und gemeldet, ohne Termine zu verschieben.                   |
 | **Versionierung**         | Automatische Checkpoints (max. alle 10 Min, die letzten 50) plus sofortiges Undo/Redo per `Strg+Z`.                  |
-| **Auswertung**            | Klick auf einen Zeitraum oder Knopfdruck unter einer Liste: Tabelle aller Einzelpositionen, in Excel kopierbar. |
+| **Auswertung**            | Klick auf einen Zeitraum oder Knopfdruck unter einer Liste: Tabelle aller Einzelpositionen, in Excel kopierbar.      |
 | **Notizen im Netzplan**   | Freie Kacheln auf der Fläche – direkt beschreibbar, frei verschiebbar; leer geschrieben heißt gelöscht.              |
 | **Zwei Fenster**          | Aufgaben und Ressourcen gleichzeitig auf zwei Bildschirmen – dieselbe Sitzung, dieselbe Datei, kein Abgleich.        |
-| **Export**                | Netzplan, Gantt und Ganglinien als PNG, der gesamte Bestand als CSV für Excel – ohne Umweg über einen Dienst.       |
+| **Export**                | Netzplan, Gantt und Ganglinien als PNG, der gesamte Bestand als CSV für Excel – ohne Umweg über einen Dienst.        |
 | **KI-Austausch**          | Exportiert den Bestand als Markdown mit Schema-Anleitung für ein LLM; der Import zeigt vor der Übernahme einen Diff. |
 | **Gemeinsame Ablage**     | Sperrvermerk in der Datei, damit auf SharePoint & Co. niemand versehentlich gleichzeitig schreibt.                   |
 | **Tastaturbedienung**     | Vollständig per Tab und Pfeiltasten bedienbar, mit Command-Palette auf `Strg+K`.                                     |
@@ -142,17 +165,31 @@ in der Kopfzeile erneut öffnen.
 6. Im Gantt lassen sich Aufgaben mit **festem Starttermin direkt ziehen**; Nachfolger wandern mit.
 7. Unten links auf **Ressourcen** wechseln, um die Auslastung über die Zeit zu sehen.
 
+### Was ein Feld bewirkt
+
+Jedes Eingabefeld trägt eine Erklärung: kurz mit der Maus darüber stehen bleiben. Sie sagt, **was der
+Wert setzt und was daraus folgt** – etwa dass FTE in die Auslastung eingeht, aber nicht in die Kosten,
+oder dass eine Dauer von 0 „kein Enddatum" bedeutet. Dieselben Hinweise stehen gesammelt in der
+Kurzanleitung unter **Hilfe**.
+
 ### Tastaturkürzel
+
+Auf dem Mac gilt ⌘ statt `Strg` und ⌥ statt `Alt`; die Anwendung zeigt die Kürzel jeweils in der
+Schreibweise des Systems, auf dem sie läuft.
 
 | Kürzel                  | Wirkung                  |     | Kürzel    | Wirkung                 |
 | ----------------------- | ------------------------ | --- | --------- | ----------------------- |
 | `Strg`+`K`              | Command-Palette          |     | `Alt`+`1` | Aufgaben · Netzplan     |
 | `Strg`+`Z` / `Strg`+`Y` | Rückgängig / Wiederholen |     | `Alt`+`2` | Aufgaben · Gantt        |
 | `Strg`+`S`              | Sofort speichern         |     | `Alt`+`3` | Ressourcen · Ganglinien |
-| `Strg`+`O`              | Datei öffnen             |     | `Alt`+`4` | Ressourcen · Tabelle    |
-| `Alt`+`N`               | Neue Aufgabe             |     | `Alt`+`G` | Netzplan ⇄ Gantt        |
-| `Alt`+`V`               | Neues Vorhaben           |     | `Alt`+`W` | Warnzentrum             |
-|                         |                          |     | `Alt`+`H` | Kurzanleitung           |
+| `Strg`+`C` / `Strg`+`V` | Aufgabe kopieren         |     | `Alt`+`4` | Ressourcen · Tabelle    |
+| `Alt`+`O`               | Datei öffnen             |     | `Alt`+`G` | Netzplan ⇄ Gantt        |
+| `Alt`+`N`               | Neue Aufgabe             |     | `Alt`+`W` | Warnzentrum             |
+| `Alt`+`V`               | Neues Vorhaben           |     | `Alt`+`H` | Kurzanleitung           |
+
+Belegt werden nur Kombinationen, die dem Browser nicht gehören – mit zwei bewussten Ausnahmen:
+`Strg`+`S` speichert die eigene Datei statt der Webseite, `Strg`+`K` öffnet die Befehlspalette.
+Auf dem Mac entfällt ⌘`Y` (dort der Browser-Verlauf), wiederholt wird mit ⇧⌘`Z`.
 
 ## Fachliches Modell
 

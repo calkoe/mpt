@@ -49,6 +49,7 @@ export function AssignmentFields({
 
         <div className="line-item__controls">
           <Segmented
+            title="Wie der Aufwand angegeben wird. Beim Umschalten wird der Wert über die Laufzeit umgerechnet, die Belastung bleibt also dieselbe."
             value={assignment.mode}
             onChange={(mode) =>
               onEdit('Bindungsart geändert', (a) => {
@@ -60,8 +61,12 @@ export function AssignmentFields({
               })
             }
             options={[
-              { value: 'FTE', label: 'FTE', title: 'Anteil pro Woche (0..1)' },
-              { value: 'PT', label: 'PT', title: 'Personentage gesamt' },
+              {
+                value: 'FTE',
+                label: 'FTE',
+                title: 'Anteil einer Vollzeitstelle (0..1), gleichmäßig über die Laufzeit - Maßstab für die Auslastung.',
+              },
+              { value: 'PT', label: 'PT', title: 'Personentage insgesamt, gleichmäßig auf die Arbeitstage verteilt.' },
             ]}
           />
           <div style={{ minWidth: 190, flex: 1 }}>
@@ -69,6 +74,7 @@ export function AssignmentFields({
               min={0}
               max={sliderMax(assignment.mode)}
               step={sliderStep(assignment.mode)}
+              title="Aufwand dieser Person für die Aufgabe. Er verteilt sich über die Laufzeit, geht in Auslastung, Ganglinien und Überlastwarnungen ein - nicht in die Kosten."
               value={assignment.value}
               onChange={(value) =>
                 onEdit('Aufwand geändert', (a) => { a.value = value; }, `asg-${assignment.id}`)
@@ -84,6 +90,7 @@ export function AssignmentFields({
         {assignment.periods.map((period) => (
           <div key={period.id} className="row row--wrap subperiod">
             <PeriodPicker
+              title="Zeitraum mit abweichendem Bedarf. Er wird auf die Laufzeit der Aufgabe zugeschnitten; außerhalb gilt weiter der Wert oben."
               from={period.from}
               to={period.to}
               onChange={(from, to) =>
@@ -101,6 +108,7 @@ export function AssignmentFields({
                 min={0}
                 max={sliderMax(assignment.mode)}
                 step={sliderStep(assignment.mode)}
+                title="Aufwand in diesem Zeitraum. Er ersetzt dort den Wert oben - etwa für eine Anlaufphase mit halber Kraft."
                 value={period.value}
                 suffix={assignment.mode}
                 onChange={(value) =>

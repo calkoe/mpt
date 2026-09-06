@@ -8,6 +8,7 @@ import { describeCheckpoint, formatCheckpointTime, pushCheckpoint, restoreCheckp
 import { MAX_CHECKPOINTS } from '../../model/types';
 import { useStore } from '../../state/store';
 import { Button, EmptyState, Modal } from '../components/controls';
+import { formatShortcut, SHORTCUTS } from '../shortcuts';
 
 export function CheckpointDialog({ onClose }: { onClose: () => void }) {
   const { db, replaceDatabase } = useStore();
@@ -21,7 +22,7 @@ export function CheckpointDialog({ onClose }: { onClose: () => void }) {
       footer={
         <>
           <span className="faint grow" style={{ fontSize: 'var(--fs-sm)' }}>
-            Automatisch bei Änderungen, höchstens alle 10 Minuten. Für einzelne Schritte: Strg+Z.
+            Automatisch bei Änderungen, höchstens alle 10 Minuten. Für einzelne Schritte: {formatShortcut(SHORTCUTS.undo)}.
           </span>
           <Button
             onClick={() => {

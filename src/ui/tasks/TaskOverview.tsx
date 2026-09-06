@@ -19,6 +19,7 @@ import { DetachButton } from '../PanelWindow';
 import { GanttChart } from './GanttChart';
 import { NetworkChart } from './NetworkChart';
 import { TaskEditor, TaskEditorHeader } from './TaskEditor';
+import { SHORTCUTS, withShortcut } from '../shortcuts';
 
 export function TaskOverview() {
   const { client, ui, setUi, commitClient } = useStore();
@@ -58,17 +59,19 @@ export function TaskOverview() {
         <div className="panel__head">
           <Segmented<TaskView>
             ariaLabel="Darstellung"
+            title="Netz der Abhängigkeiten oder Balken über die Zeit - derselbe Plan, zwei Sichten."
             value={prefs.taskView}
             onChange={(taskView) => setPrefs({ taskView })}
             options={[
-              { value: 'network', label: 'Netzplan', title: 'Abhängigkeitsnetz (Alt+G)' },
-              { value: 'gantt', label: 'Gantt', title: 'Balkenplan (Alt+G)' },
+              { value: 'network', label: 'Netzplan', title: withShortcut('Abhängigkeitsnetz', SHORTCUTS.togglePlan) },
+              { value: 'gantt', label: 'Gantt', title: withShortcut('Balkenplan', SHORTCUTS.togglePlan) },
             ]}
           />
 
           {/* Kurze Beschriftungen, damit die Leiste einzeilig bleibt. */}
           <Segmented<Scenario>
             ariaLabel="Szenario"
+            title="Rechnet den ganzen Plan mit der minimalen oder der maximalen Dauer. Das ändert Termine, Puffer, kritischen Pfad und die Lage der Ressourcenlasten."
             value={prefs.scenario}
             onChange={(scenario) => setPrefs({ scenario })}
             options={[
@@ -80,6 +83,7 @@ export function TaskOverview() {
           {prefs.taskView === 'gantt' && (
             <Segmented<Granularity>
               ariaLabel="Zeitraster"
+              title="Breite der Zeitachse im Gantt. Nur die Darstellung ändert sich, keine Zahl."
               value={prefs.ganttGranularity}
               onChange={(ganttGranularity) => setPrefs({ ganttGranularity })}
               options={SELECTABLE_GRANULARITIES.map((g) => ({
@@ -99,6 +103,7 @@ export function TaskOverview() {
           {prefs.taskView === 'network' && (
             <Segmented<Weighting>
               ariaLabel="Gewichtung"
+              title="Was der Balken am Knoten zeigt. Nur Darstellung - am Plan ändert die Wahl nichts."
               value={prefs.weighting}
               onChange={(weighting) => setPrefs({ weighting })}
               options={[
@@ -137,7 +142,7 @@ export function TaskOverview() {
             onChange={(showResourceRail) => setPrefs({ showResourceRail })}
           />
 
-          <Button variant="primary" onClick={addTask} title="Neue Aufgabe (Alt+N)">
+          <Button variant="primary" onClick={addTask} title={withShortcut('Neue Aufgabe', SHORTCUTS.newTask)}>
             + Aufgabe
           </Button>
 

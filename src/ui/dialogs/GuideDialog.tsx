@@ -11,6 +11,7 @@
  */
 import type { ReactNode } from 'react';
 import { Modal } from '../components/controls';
+import { ALL_SHORTCUTS, shortcutParts, SHORTCUT_GROUPS } from '../shortcuts';
 
 interface Step {
   title: string;
@@ -77,12 +78,53 @@ export function GuideDialog({ onClose }: { onClose: () => void }) {
         ))}
       </div>
 
+      <ShortcutHelp />
+
       <p className="faint" style={{ marginBottom: 0 }}>
-        Wichtigste Tasten: <kbd>Strg</kbd>+<kbd>K</kbd> Befehle · <kbd>Alt</kbd>+<kbd>1</kbd>…<kbd>4</kbd>{' '}
-        Ansichten · <kbd>Alt</kbd>+<kbd>N</kbd> neue Aufgabe · <kbd>Strg</kbd>+<kbd>Z</kbd> rückgängig.
         Diese Anleitung lässt sich über "Hilfe" in der Kopfzeile jederzeit erneut öffnen.
       </p>
     </Modal>
+  );
+}
+
+/**
+ * Tasten und Tooltips.
+ *
+ * Die Liste wird aus der Belegung erzeugt (`ui/shortcuts.ts`) und zeigt sie so,
+ * wie sie auf **diesem** Rechner gilt: auf dem Mac ⌘⌥⇧, sonst ausgeschrieben.
+ * Eine von Hand gepflegte Aufzählung stand hier vorher - und nannte Tasten,
+ * die es teils gar nicht gab.
+ */
+function ShortcutHelp() {
+  return (
+    <section className="guide__keys">
+      <h3 className="guide__title">Tasten und Tooltips</h3>
+      <p className="guide__text">
+        Jedes Eingabefeld erklärt sich selbst: kurz mit der Maus darüber stehen bleiben. Der Hinweis
+        sagt, was der Wert setzt und was daraus im Plan folgt - etwa welche Zahl in die Auslastung
+        eingeht und welche in die Kosten.
+      </p>
+
+      <div className="guide__shortcuts">
+        {SHORTCUT_GROUPS.map((group) => (
+          <div key={group} className="col">
+            <div className="guide__group">{group}</div>
+            {ALL_SHORTCUTS.filter(([, sc]) => sc.group === group).map(([id, sc]) => (
+              <div key={id} className="guide__key">
+                <span className="guide__combo">
+                  {shortcutParts(sc).map((part) => (
+                    <kbd key={part}>{part}</kbd>
+                  ))}
+                </span>
+                {/* Kein Abschneiden: eine halbe Beschriftung neben einer
+                    Taste ist schlimmer als eine zweite Zeile. */}
+                <span>{sc.label}</span>
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 

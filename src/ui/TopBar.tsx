@@ -8,7 +8,7 @@
  *  - der Warnzähler - er ist der Einstieg ins Warnzentrum und zeigt schon in
  *    der Leiste, ob etwas nicht stimmt.
  */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { createClient, createDatabase, createVenture } from "../model/factory";
 import { migrate } from "../model/migrate";
 import { useStore } from "../state/store";
@@ -28,6 +28,7 @@ import { formatAge, inspectLock, type LockStatus } from "../persistence/lock";
 import { databaseToCsv } from "../export/csv";
 import { timestampedName } from "../export/png";
 import { Button, Modal, Segmented } from "./components/controls";
+import { SHORTCUTS, withShortcut } from "./shortcuts";
 import { CheckpointDialog } from "./dialogs/CheckpointDialog";
 import { AiDialog } from "./dialogs/AiDialog";
 import { useWarningGroups } from "./dialogs/WarningCenter";
@@ -42,12 +43,18 @@ export function TopBar({
   onOpenPalette,
   onOpenWarnings,
   onOpenGuide,
+  onProvideOpen,
   recalled,
   onRecalledHandled,
 }: {
   onOpenPalette: () => void;
   onOpenWarnings: () => void;
   onOpenGuide: () => void;
+  /**
+   * Meldet das Oeffnen an den App-Rahmen, damit das Tastenkuerzel dieselbe
+   * Funktion aufruft - mitsamt Sperrpruefung und Hinweisen. Siehe App.tsx.
+   */
+  onProvideOpen: (open: () => void) => void;
   /** Zuletzt verwendete Datei aus IndexedDB, falls vorhanden. */
   recalled: FileSystemFileHandle | null;
   onRecalledHandled: () => void;
@@ -146,6 +153,16 @@ export function TopBar({
     }
   };
 
+  /*
+   * Dasselbe Öffnen für das Tastenkürzel. Bei jedem Render neu angemeldet,
+   * damit die Funktion nie auf einen alten Zustand zeigt; der Aufruf selbst
+   * passiert im App-Rahmen direkt im Tastendruck, sonst verweigert der
+   * Browser den Dateiwähler.
+   */
+  useEffect(() => {
+    onProvideOpen(() => void openFile());
+  });
+
   const newFile = async () => {
     setError(null);
     try {
@@ -204,7 +221,7 @@ export function TopBar({
 
       <div className="topbar__divider" />
 
-      <Button onClick={() => void openFile()} title="Datenbestand öffnen (Strg+O)">
+      <Button onClick={() => void openFile()} title={withShortcut('Datenbestand öffnen', SHORTCUTS.open)}>
         Öffnen
       </Button>
       <Button onClick={newFile} title="Neuen leeren Datenbestand anlegen">
@@ -270,8 +287,8 @@ export function TopBar({
         onClick={onOpenWarnings}
         title={
           warningCount > 0
-            ? `${warningCount} Hinweis(e) - Warnzentrum öffnen (Alt+W)`
-            : "Keine Hinweise - Warnzentrum öffnen (Alt+W)"
+            ? withShortcut(`${warningCount} Hinweis(e) - Warnzentrum öffnen`, SHORTCUTS.warnings)
+            : withShortcut('Keine Hinweise - Warnzentrum öffnen', SHORTCUTS.warnings)
         }
         aria-label="Warnzentrum öffnen"
       >
@@ -280,10 +297,10 @@ export function TopBar({
 
       <div className="topbar__divider" />
 
-      <Button icon variant="ghost" disabled={!store.canUndo} onClick={store.undo} title="Rückgängig (Strg+Z)">
+      <Button icon variant="ghost" disabled={!store.canUndo} onClick={store.undo} title={withShortcut('Rückgängig', SHORTCUTS.undo)}>
         &#8630;
       </Button>
-      <Button icon variant="ghost" disabled={!store.canRedo} onClick={store.redo} title="Wiederholen (Strg+Y)">
+      <Button icon variant="ghost" disabled={!store.canRedo} onClick={store.redo} title={withShortcut('Wiederholen', SHORTCUTS.redo)}>
         &#8631;
       </Button>
 
@@ -315,10 +332,10 @@ export function TopBar({
       >
         KI-Austausch
       </Button>
-      <Button variant="ghost" onClick={onOpenGuide} title="Kurzanleitung erneut anzeigen (Alt+H)">
+      <Button variant="ghost" onClick={onOpenGuide} title={withShortcut('Kurzanleitung erneut anzeigen', SHORTCUTS.guide)}>
         Hilfe
       </Button>
-      <Button variant="ghost" onClick={onOpenPalette} title="Befehle (Strg+K)">
+      <Button variant="ghost" onClick={onOpenPalette} title={withShortcut('Befehle', SHORTCUTS.palette)}>
         &#9906;
       </Button>
 

@@ -71,6 +71,7 @@ export function CostFields({
         <TextInput
           value={cost.label}
           placeholder="Bezeichnung"
+          title="Bezeichnung der Kostenposition. Sie steht in der Auswertung des Budgets und in der CSV-Ausgabe."
           onChange={(label) =>
             onEdit(
               "Kostenposition bearbeitet",
@@ -87,6 +88,7 @@ export function CostFields({
             <MeasureLabel measure="planned" />
           </span>
           <AmountInput
+            title="Geplanter Betrag (○). Er wird zur Laufzeit der Aufgabe fällig, zählt gegen die Obergrenze des Budgets und bildet die Ganglinie."
             value={cost.amount}
             onChange={(amount) =>
               onEdit(
@@ -103,6 +105,7 @@ export function CostFields({
             <MeasureLabel measure="actual" />
           </span>
           <AmountInput
+            title="Tatsächlich abgerufener Betrag (●). Die Differenz zum geplanten ist der offene Rest; die Terminrechnung berührt er nicht."
             value={cost.actualAmount}
             onChange={(actualAmount) =>
               onEdit(
@@ -127,6 +130,7 @@ export function CostFields({
             min={0}
             max={100}
             step={5}
+            title="Setzt den abgerufenen Betrag als Anteil des geplanten - eine Abkürzung für das Feld darüber, nicht ein eigener Wert."
             value={spentPercent(cost)}
             format={(v) => `${v} %`}
             onChange={(value) =>
@@ -144,7 +148,7 @@ export function CostFields({
           <Switch
             checked={cost.recurring}
             label="wiederkehrend"
-            title="Fällt am ersten Tag jedes Zeitraums an, solange die Aufgabe läuft"
+            title="Wiederkehrend: der Betrag fällt am ersten Tag jedes Zeitraums erneut an, solange die Aufgabe läuft - aus einem Betrag wird eine Reihe."
             onChange={(recurring) =>
               onEdit("Kostenart geändert", (c) => {
                 c.recurring = recurring;
@@ -161,6 +165,7 @@ export function CostFields({
                     value={cost.every}
                     min={1}
                     ariaLabel="Intervallfaktor"
+                    title="Faktor des Rhythmus: 3 mit Einheit Monat heißt alle drei Monate."
                     onChange={(every) =>
                       onEdit(
                         "Intervall geändert",
@@ -174,6 +179,7 @@ export function CostFields({
                 </div>
                 <select
                   className="select grow"
+                  title="Raster der Wiederholung. Gebucht wird jeweils am ersten Tag des Zeitraums; liegt der Aufgabenstart mittendrin, rückt der erste Abruf auf den nächsten Rasterbeginn."
                   value={cost.interval}
                   onChange={(e) =>
                     onEdit("Intervall geändert", (c) => {
@@ -223,6 +229,7 @@ export function CostFields({
           className="input--note"
           value={cost.note}
           placeholder="Notiz - Bestellnummer, Stand der Abrechnung..."
+          title="Freier Vermerk zur Position, etwa Bestellnummer oder Abrechnungsstand. Erscheint in der CSV-Ausgabe; auf die Rechnung wirkt er nicht."
           onChange={(note) =>
             onEdit(
               "Notiz geändert",

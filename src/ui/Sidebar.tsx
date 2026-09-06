@@ -16,6 +16,7 @@ import { TagDialog } from './dialogs/TagDialog';
 import { WorkloadDialog } from './dialogs/WorkloadDialog';
 import { useDetached } from './PanelWindow';
 import { moveItem, useReorder } from './components/useReorder';
+import { SHORTCUTS, withShortcut } from './shortcuts';
 
 export function Sidebar() {
   const { db, client, ui, setUi, commit, commitClient } = useStore();
@@ -57,7 +58,7 @@ export function Sidebar() {
             className="select grow"
             value={client?.id ?? ''}
             onChange={(e) => setUi({ clientId: e.target.value, ventureId: null, selectedTaskId: null, selectedResourceId: null })}
-            title="Trennt den Datenbestand in unabhängige Projekte"
+            title="Wechselt den Mandanten. Jeder hat eigene Vorhaben, Aufgaben und Ressourcen; gerechnet wird immer nur innerhalb eines Mandanten."
           >
             {db.clients.map((c) => (
               <option key={c.id} value={c.id}>
@@ -74,6 +75,7 @@ export function Sidebar() {
           <div className="col" style={{ marginTop: 'var(--sp-2)' }}>
             <Field label="Name">
               <TextInput
+                title="Name des Mandanten. Erscheint in der Auswahl oben, in Exporten und im Dateinamen von Bilddateien."
                 value={client?.name ?? ''}
                 onChange={(name) =>
                   commit('Mandant umbenannt', (clients) => {
@@ -121,7 +123,7 @@ export function Sidebar() {
           <span className="sidebar__label" style={{ margin: 0 }}>
             Vorhaben
           </span>
-          <Button size="sm" variant="ghost" onClick={addVenture} title="Neues Vorhaben (Alt+V)">
+          <Button size="sm" variant="ghost" onClick={addVenture} title={withShortcut('Neues Vorhaben', SHORTCUTS.newVenture)}>
             + Neu
           </Button>
         </div>
@@ -207,6 +209,7 @@ export function Sidebar() {
                   <TextInput
                     value={venture.name}
                     placeholder="Name des Vorhabens"
+                    title="Name des Vorhabens. Es bündelt Aufgaben, filtert Plan und Auswertungen und gilt als abgeschlossen, sobald alle seine Aufgaben es sind."
                     onChange={(name) =>
                       commitClient('Vorhaben umbenannt', (c) => {
                         const v = c.ventures.find((x) => x.id === venture.id);
@@ -256,6 +259,7 @@ export function Sidebar() {
           <Field label="Schnellsprung Aufgabe">
             <Combobox
               placeholder="Aufgabe suchen..."
+              title="Springt zu einer Aufgabe - über alle Vorhaben hinweg. Die Auswahl öffnet sie im Plan und im Editor darunter."
               options={client.tasks.map((t) => ({
                 id: t.id,
                 label: t.title,
@@ -283,8 +287,8 @@ export function Sidebar() {
           value={ui.mode}
           onChange={(mode) => setUi({ mode })}
           options={([
-            ['tasks', 'Aufgaben', 'Aufgabenübersicht (Alt+1)'],
-            ['resources', 'Ressourcen', 'Ressourcenübersicht (Alt+3)'],
+            ['tasks', 'Aufgaben', withShortcut('Aufgabenübersicht', SHORTCUTS.viewNetwork)],
+            ['resources', 'Ressourcen', withShortcut('Ressourcenübersicht', SHORTCUTS.viewResourceChart)],
           ] as const).map(([value, label, title]) => ({
             value,
             label: detached?.mode === value ? `${label} ⧉` : label,

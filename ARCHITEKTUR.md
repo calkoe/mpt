@@ -167,6 +167,7 @@ werden (`fill: none` an Kanten), sonst füllt das Bild sie schwarz aus.
 | `components/AssignmentFields.tsx`                   | Eine Personalzuordnung zum Bearbeiten - genutzt von der Aufgaben- **und** der Personenseite.         |
 | `components/TagFilter.tsx`                          | Tag-Filter als Aufklappmenü, in Aufgaben- und Ressourcenansicht identisch.                           |
 | `components/CostFields.tsx`                         | Eine Kostenposition zum Bearbeiten - genutzt von der Aufgaben- **und** der Budgetseite.              |
+| `shortcuts.ts`                                      | **Alle Tastenkürzel** - Belegung, Prüfung und Anzeige an einer Stelle. Vergleicht `code` **und** `key`: unter macOS liefert die Wahltaste ein Sonderzeichen. |
 | `components/ownerWindow.ts`                         | `windowOf()` / `documentOf()` - **nie `window` oder `document` global annehmen**, siehe unten.       |
 | `PanelWindow.tsx`                                   | Eine der beiden Ansichten in einem eigenen Browserfenster (Portal, dieselbe Instanz). `DetachButton` steht **ganz rechts** in beiden Werkzeugleisten. |
 | `Sidebar.tsx` / `TopBar.tsx` / `CommandPalette.tsx` | Rahmen der Anwendung.                                                                                |
@@ -336,6 +337,13 @@ Zwei Dateien, mehr nicht:
 
 Beim Ergänzen von UI: erst prüfen, ob eine Klasse existiert. Inline-`style` ist nur für berechnete Werte
 zulässig (Positionen, Breiten, Tag-Farben) – nie für Farben aus der Palette.
+
+**Jedes Eingabefeld trägt ein `title`.** Die Regel für den Text steht über `Field` in
+`components/controls.tsx`: *ein Satz, was der Wert setzt – und ein Satz, was daraus folgt.* Die
+Beschriftung wird nicht wiederholt. Beim `Segmented` erklärt das `title` der Gruppe, **was**
+eingestellt wird, das `title` je Option die einzelne Möglichkeit; beim Überfahren gewinnt die
+konkretere Angabe. Verwendet wird der native Tooltip des Browsers – er funktioniert auch im
+ausgelagerten Fenster und beim Drucken und kostet kein Kilobyte.
 
 ## 7. Schema ändern – die vollständige Checkliste
 

@@ -12,6 +12,7 @@ import { useMemo } from 'react';
 import { TAG_PALETTE } from '../../model/factory';
 import { useStore } from '../../state/store';
 import { Button, ConfirmButton, EmptyState, Modal, TextInput } from '../components/controls';
+import { SHORTCUTS, shortcutParts } from '../shortcuts';
 
 export function TagDialog({ onClose }: { onClose: () => void }) {
   const { client, commitClient } = useStore();
@@ -59,7 +60,12 @@ export function TagDialog({ onClose }: { onClose: () => void }) {
           {client.tags.map((tag) => (
             <div key={tag.id} className="tagrow">
               <span className="chip__dot tagrow__dot" style={{ background: tag.color }} />
-              <TextInput value={tag.name} placeholder="Name" onChange={(name) => rename(tag.id, name)} />
+              <TextInput
+                value={tag.name}
+                placeholder="Name"
+                title="Name des Tags. Er wirkt überall zugleich - an jeder Aufgabe, jeder Ressource und in beiden Filtern."
+                onChange={(name) => rename(tag.id, name)}
+              />
               <div className="tagrow__swatches">
                 {TAG_PALETTE.map((color) => (
                   <button
@@ -99,7 +105,11 @@ export function TagDialog({ onClose }: { onClose: () => void }) {
 
       <p className="faint" style={{ margin: 0, fontSize: 'var(--fs-sm)' }}>
         Die Farbe eines Tags färbt auch den Balken im Gantt und den Streifen am Knoten im Netzplan.
-        Änderungen wirken sofort und lassen sich mit <kbd>Strg</kbd>+<kbd>Z</kbd> zurücknehmen.
+        Änderungen wirken sofort und lassen sich mit{' '}
+        {shortcutParts(SHORTCUTS.undo).map((part) => (
+          <kbd key={part}>{part}</kbd>
+        ))}{' '}
+        zurücknehmen.
       </p>
 
       <div className="row">

@@ -81,12 +81,19 @@ export function Segmented<T extends string>({
   onChange,
   block = false,
   ariaLabel,
+  title,
 }: {
   options: SegmentedOption<T>[];
   value: T;
   onChange: (value: T) => void;
   block?: boolean;
   ariaLabel?: string;
+  /**
+   * Erklärt, **was** hier eingestellt wird. Die Erklärung der einzelnen
+   * Möglichkeiten steht an der jeweiligen Option; steht dort etwas, gewinnt
+   * es beim Überfahren - genau richtig, denn dann ist die Frage konkreter.
+   */
+  title?: string;
 }) {
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
@@ -102,6 +109,7 @@ export function Segmented<T extends string>({
       className={`segmented${block ? ' segmented--block' : ''}`}
       role="radiogroup"
       aria-label={ariaLabel}
+      title={title}
       onKeyDown={onKeyDown}
     >
       {options.map((option) => (
@@ -152,19 +160,44 @@ export function Switch({
 // Field-Hülle
 // ---------------------------------------------------------------------------
 
+/**
+ * Beschriftetes Feld.
+ *
+ * **Zu jedem Eingabefeld gehört ein `title`.** Die Regel für den Text lautet:
+ * *ein Satz, was der Wert setzt - und ein Satz, was daraus folgt.* Die
+ * Beschriftung wird nicht wiederholt, und was ohnehin danebensteht, gehört
+ * nicht hinein.
+ *
+ * ```
+ * Dauer minimal → "Optimistische Dauer. Im Szenario 'opt.' bestimmt sie Ende,
+ *                  Puffer und kritischen Pfad - die Nachfolger rücken mit."
+ * FTE           → "Anteil einer Vollzeitstelle über die Laufzeit. Geht in
+ *                  Auslastung und Warnungen ein, nicht in die Kosten."
+ * ```
+ *
+ * Der Hinweis unter dem Feld (`hint`) ist etwas anderes: er steht immer da und
+ * trägt eine Zahl oder eine Einheit. Der Tooltip erklärt die Wirkung.
+ */
 export function Field({
   label,
   hint,
   children,
   action,
+  title,
 }: {
   label?: ReactNode;
   hint?: ReactNode;
   children: ReactNode;
   action?: ReactNode;
+  /**
+   * Erklärung für die ganze Gruppe - nur, wenn eine Überschrift mehrere
+   * Bedienelemente überspannt. Sonst gehört der Tooltip an das Element selbst,
+   * damit er auch beim Überfahren des Werts erscheint.
+   */
+  title?: string;
 }) {
   return (
-    <div className="field">
+    <div className="field" title={title}>
       {(label || action) && (
         <div className="field__label">
           <span className="grow truncate">{label}</span>
@@ -297,6 +330,7 @@ export function TextArea({
   value,
   onChange,
   placeholder,
+  title,
   rows = 3,
   className = 'textarea',
   autoFocus = false,
@@ -306,6 +340,7 @@ export function TextArea({
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
+  title?: string;
   rows?: number;
   /** Für Sonderfälle wie die Notizkachel im Netzplan. */
   className?: string;
@@ -327,6 +362,7 @@ export function TextArea({
   return (
     <textarea
       className={className}
+      title={title}
       rows={rows}
       // eslint-disable-next-line jsx-a11y/no-autofocus
       autoFocus={autoFocus}
@@ -617,6 +653,7 @@ export function Combobox({
   onSelect,
   onCreate,
   placeholder = 'Suchen oder anlegen...',
+  title,
   createLabel = (q: string) => `"${q}" neu anlegen`,
   autoFocus = false,
   value,
@@ -626,6 +663,7 @@ export function Combobox({
   onSelect: (id: string) => void;
   onCreate?: (name: string) => void;
   placeholder?: string;
+  title?: string;
   createLabel?: (query: string) => string;
   autoFocus?: boolean;
   /** Optional kontrolliert - sonst intern. */
@@ -710,6 +748,7 @@ export function Combobox({
         aria-autocomplete="list"
         autoFocus={autoFocus}
         value={query}
+        title={title}
         placeholder={placeholder}
         onChange={(e) => {
           setQuery(e.target.value);

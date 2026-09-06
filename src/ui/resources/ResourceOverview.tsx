@@ -256,6 +256,7 @@ export function ResourceOverview() {
 
           <Segmented<ResourceView>
             ariaLabel="Darstellung"
+            title="Ganglinien über die Zeit oder Zahlen je Zeitraum - dieselben Werte, zwei Darstellungen."
             value={prefs.resourceView}
             onChange={(resourceView) => setPrefs({ resourceView })}
             options={[
@@ -268,6 +269,7 @@ export function ResourceOverview() {
           {prefs.resourceView === 'table' && (
             <Segmented<CostMeasure>
               ariaLabel="Kennzahl"
+              title="Welche der drei Geldgrößen die Tabelle zeigt. Sie werden nie vermischt - genehmigt ist der Rahmen, geplant die Zusage, ausgegeben der Abruf."
               value={prefs.costMeasure}
               onChange={(costMeasure) => setPrefs({ costMeasure })}
               options={COST_MEASURES.map((m) => ({
@@ -280,6 +282,7 @@ export function ResourceOverview() {
 
           <Segmented<Granularity>
             ariaLabel="Zeitraster"
+            title="Breite eines Balkens bzw. einer Spalte. Die Summen bleiben dieselben, sie werden nur gröber zusammengefasst."
             value={prefs.resourceGranularity}
             onChange={(resourceGranularity) => setPrefs({ resourceGranularity })}
             options={SELECTABLE_GRANULARITIES.map((g) => ({
@@ -290,11 +293,12 @@ export function ResourceOverview() {
 
           <Segmented<PersonUnit>
             ariaLabel="Einheit für Personen"
+            title="Maßstab für Personen: FTE misst die Auslastung gegen die Kapazität, PT zählt Personentage."
             value={prefs.personUnit}
             onChange={(personUnit) => setPrefs({ personUnit })}
             options={[
-              { value: 'FTE', label: 'FTE', title: 'Mittlere Auslastung je Zeitraum' },
-              { value: 'PT', label: 'PT', title: 'Personentage je Zeitraum' },
+              { value: 'FTE', label: 'FTE', title: 'Mittlere Auslastung je Zeitraum - vergleichbar mit der Verfügbarkeit.' },
+              { value: 'PT', label: 'PT', title: 'Personentage je Zeitraum - aufsummierbar, aber ohne Bezug zur Kapazität.' },
             ]}
           />
 
@@ -304,7 +308,7 @@ export function ResourceOverview() {
             <TextInput
               value={search}
               placeholder="Ressource suchen..."
-              title="Filtert Ganglinien und Listen nach Name oder Rolle"
+              title="Filtert Ganglinien und Listen nach Name oder Rolle. Die Summen darunter beziehen sich auf das, was übrig bleibt."
               onChange={setSearch}
             />
           </div>
@@ -845,6 +849,7 @@ function ResourceLists({
           <div className="editor__section-title">Personen ({client.people.length})</div>
           {/* Zeitraum der Kennzahlen - gilt für die Zeilen und die Summe. */}
           <PeriodPicker
+            title="Zeitraum der Zahlen rechts in der Liste und der Summe darunter. Die Zuordnungen selbst bleiben unberührt - es wird nur anders zusammengefasst."
             from={personRange.from}
             to={personRange.to}
             total={horizon}
@@ -869,6 +874,7 @@ function ResourceLists({
         <div className="editor__section">
           <div className="editor__section-title">Budgets ({client.budgets.length})</div>
           <PeriodPicker
+            title="Zeitraum der Beträge rechts in der Liste und der Summe darunter. Er gilt auch für die Auswertung, die der Knopf darunter erzeugt."
             from={budgetRange.from}
             to={budgetRange.to}
             total={horizon}
@@ -1048,6 +1054,7 @@ function ConditionList() {
             </span>
             <Switch
               checked={condition.met}
+              title="Erfüllt oder offen. Offene Bedingungen erzeugen an den Aufgaben, die darauf verweisen, eine Warnung - Termine bleiben unberührt."
               onChange={(met) =>
                 commitClient(met ? 'Bedingung erfüllt' : 'Bedingung offen', (c) => {
                   const target = c.conditions.find((x) => x.id === condition.id);
@@ -1059,6 +1066,7 @@ function ConditionList() {
               <TextInput
                 value={condition.name}
                 placeholder="Bedingung"
+                title="Name der Bedingung. Aufgaben können darauf verweisen; ist sie nicht erfüllt, warnt MPT - Termine verschiebt sie nie."
                 onChange={(name) =>
                   commitClient('Bedingung umbenannt', (c) => {
                     const target = c.conditions.find((x) => x.id === condition.id);

@@ -2185,6 +2185,42 @@ kbd {
   .guide__step { grid-template-columns: 1fr; }
 }
 
+/* Tasten und Tooltips am Fuss der Anleitung. Vier Spalten, solange Platz ist -
+   die Gruppen sind kurz, und untereinander entstuende eine lange Liste. */
+.guide__keys {
+  padding: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+}
+
+.guide__shortcuts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: var(--sp-3);
+  margin-top: var(--sp-3);
+}
+
+.guide__group {
+  font-size: var(--fs-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+  color: var(--text-faint);
+}
+
+.guide__key {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  min-width: 0;
+}
+
+/* Feste Breite fuer die Tastenspalte, damit die Beschriftungen fluchten. */
+.guide__combo { flex: none; width: 92px; display: flex; gap: 2px; }
+
 /* Tag-Verwaltung */
 .tagrow {
   display: grid;
